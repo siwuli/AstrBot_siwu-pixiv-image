@@ -45,7 +45,9 @@ from .pixiv_api import (
 from .r18_policy import (
     R18StateStore,
     can_enable_r18,
+    migrate_legacy_keys,
     parse_id_list,
+    session_key,
 )
 
 logger = logging.getLogger("astrbot")
@@ -114,13 +116,20 @@ class PixivImagePlugin(star.Star):
         async with _r18_store_lock:
             if _r18_store is None:
                 _r18_store = R18StateStore(R18_STATE_PATH)
+                try:
+                    moved = migrate_legacy_keys(_r18_store)
+                    if moved:
+                        logger.info(f"[pixiv_image] migrated {moved} legacy r18 session keys")
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(f"[pixiv_image] r18 key migration failed: {exc}")
             return _r18_store
 
     async def _session_r18_level(self, event: AstrMessageEvent) -> str:
-        """会话级 R18 档位：会话显式设置优先，否则回落全局配置。"""
+        """会话级 R18 档位：群聊按群维度共享，私聊按人；显式设置优先，否则回落全局。"""
         try:
             store = await self._r18_store_get()
-            lv = store.get(str(event.unified_msg_origin))
+            group_id = getattr(getattr(event, "message_obj", None), "group_id", None)
+            lv = store.get(session_key(event.get_sender_id(), group_id))
             if lv in R18_LEVELS:
                 return lv
         except Exception as exc:  # noqa: BLE001
@@ -469,15 +478,16 @@ class PixivImagePlugin(star.Star):
     # ------------------------------------------------------------------
     async def _cmd_r18(self, event: AstrMessageEvent, parts: list):
         sub = parts[1].lower() if len(parts) > 1 else "status"
-        origin = str(event.unified_msg_origin)
         sender = str(event.get_sender_id() or "")
         group_id = getattr(getattr(event, "message_obj", None), "group_id", None)
         # 私聊事件 group_id 可能为 None/空串/"0"，归一化后再走群聊判断
         if group_id is not None and str(group_id).strip() in ("", "0"):
             group_id = None
+        # 群聊按群维度共享状态（白名单账号开一次，该群全体生效），私聊按人
+        key = session_key(sender, group_id)
         store = await self._r18_store_get()
         if sub == "status":
-            cur = store.get(origin) or self._r18_level()
+            cur = store.get(key) or self._r18_level()
             yield (
                 f"当前会话 R-18 档位：{cur}（safe=仅一般向 / r18=一般向+R-18 / "
                 "r18only=只R-18 / r18gonly=只R-18G / r18g=全放行）。\n"
@@ -493,7 +503,7 @@ class PixivImagePlugin(star.Star):
             if not ok:
                 yield f"无权关闭：{reason}"
                 return
-            store.clear(origin)
+            store.clear(key)
             yield f"已关闭本会话 R-18（回落到全局配置 pixiv_r18_level={self._r18_level()}）。"
             return
         ok, reason = can_enable_r18(sender, group_id, self._r18_owners(), self._r18_groups())
@@ -512,8 +522,9 @@ class PixivImagePlugin(star.Star):
             "r18only": "仅 R-18（不含一般向与 R-18G）",
             "r18gonly": "仅 R-18G",
         }[level]
-        store.set(origin, level)
-        yield f"已开启本会话 {label}。关闭请发 /pixiv r18 off"
+        store.set(key, level)
+        scope_txt = f"（{key}）" if group_id else "（私聊）"
+        yield f"已开启本会话{scope_txt} {label}。关闭请发 /pixiv r18 off"
 
     # ------------------------------------------------------------------
     # 指令组：/pixiv r18 on|all|off|status ｜ /pixiv search 关键词 ｜ /pixiv rank ｜ /pixiv help

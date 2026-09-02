@@ -22,6 +22,41 @@ R18_OFF_LEVEL = "safe"  # 关闭指令回到 safe
 R18_LEVEL_NAMES = ("safe", "r18", "r18g", "r18only", "r18gonly")
 
 
+def session_key(sender_id: str | None, group_id: str | int | None = None) -> str:
+    """会话级 R18 状态键：群聊按群维度共享（group:<gid>），私聊按人（user:<qq>）。
+
+    - 白名单账号在某群开启后，该群所有成员触发都按该档位；
+    - 私聊各自独立。
+    """
+    gid = str(group_id or "").strip()
+    if gid and gid != "0":
+        return f"group:{gid}"
+    return f"user:{str(sender_id or '').strip()}"
+
+
+def migrate_legacy_keys(store: R18StateStore) -> int:
+    """把旧版按「发送者_群号」存储的 key 迁移为群/用户维度，返回迁移条数。"""
+    migrated = 0
+    for old_key, level in store.all().items():
+        if old_key.startswith(("group:", "user:")):
+            continue
+        parts = old_key.split(":")
+        if len(parts) < 3:
+            continue
+        seg = parts[2]
+        if "_" in seg:
+            _sender, gid = seg.rsplit("_", 1)
+            new_key = f"group:{gid}" if gid.isdigit() else ""
+        elif seg.isdigit():
+            new_key = f"user:{seg}"
+        else:
+            new_key = ""
+        if new_key and store.get(new_key) is None:
+            store.set(new_key, level)
+            migrated += 1
+    return migrated
+
+
 def parse_id_list(raw: str | list | None) -> set[str]:
     """解析配置里的 QQ 号/群号列表：逗号、空格、换行分隔均可。"""
     if not raw:

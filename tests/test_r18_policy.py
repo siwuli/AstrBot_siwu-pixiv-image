@@ -6,7 +6,13 @@ import tempfile
 import unittest
 from typing import ClassVar
 
-from r18_policy import R18StateStore, can_enable_r18, parse_id_list
+from r18_policy import (
+    R18StateStore,
+    can_enable_r18,
+    migrate_legacy_keys,
+    parse_id_list,
+    session_key,
+)
 
 
 class TestParseIdList(unittest.TestCase):
@@ -26,6 +32,51 @@ class TestParseIdList(unittest.TestCase):
 
     def test_none(self):
         self.assertEqual(parse_id_list(None), set())
+
+
+class TestSessionKey(unittest.TestCase):
+    def test_group_shared(self):
+        # 群聊按群维度共享：任何成员触发都是同一个 key
+        self.assertEqual(session_key("10001", "888888"), "group:888888")
+        self.assertEqual(session_key("10002", "888888"), "group:888888")
+
+    def test_private_isolated(self):
+        self.assertEqual(session_key("10001", None), "user:10001")
+        self.assertEqual(session_key("10002", None), "user:10002")
+
+    def test_empty_group_id_is_private(self):
+        self.assertEqual(session_key("10001", ""), "user:10001")
+        self.assertEqual(session_key("10001", "0"), "user:10001")
+        self.assertEqual(session_key("10001", " "), "user:10001")
+
+
+class TestMigrateLegacyKeys(unittest.TestCase):
+    def test_group_legacy_migrated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "r18.json")
+            s = R18StateStore(p)
+            s.set("AstrBot:GroupMessage:1554808351_602519154", "r18")
+            moved = migrate_legacy_keys(s)
+            self.assertEqual(moved, 1)
+            self.assertEqual(s.get("group:602519154"), "r18")
+
+    def test_private_legacy_migrated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "r18.json")
+            s = R18StateStore(p)
+            s.set("AstrBot:FriendMessage:1554808351", "r18only")
+            moved = migrate_legacy_keys(s)
+            self.assertEqual(moved, 1)
+            self.assertEqual(s.get("user:1554808351"), "r18only")
+
+    def test_new_keys_untouched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "r18.json")
+            s = R18StateStore(p)
+            s.set("group:123", "r18")
+            s.set("user:456", "safe")
+            self.assertEqual(migrate_legacy_keys(s), 0)
+            self.assertEqual(s.get("group:123"), "r18")
 
 
 class TestCanEnableR18(unittest.TestCase):
