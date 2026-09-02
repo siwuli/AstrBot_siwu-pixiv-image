@@ -347,25 +347,65 @@ class TestPixivClient(unittest.TestCase):
         self.assertEqual([r["id"] for r in out], [22, 23, 21])
 
     def test_premium_balanced_mix(self):
-        # 默认均衡混排：热门两页（页起点轮换） + 最新一页并发请求
+        # 默认均衡混排：第 0 页热门 + 最新一页并发；热门还有下一页才追加轮换页
         hot1 = [make_illust(31, bookmarks=5000), make_illust(32, bookmarks=8000)]
         hot2 = [make_illust(33, bookmarks=7000), make_illust(34, bookmarks=6000)]
         fresh1 = [make_illust(35, bookmarks=2000)]
         c, s = self._client([
-            ({"illusts": hot1}, 200),
-            ({"illusts": hot2}, 200),
+            ({"illusts": hot1, "next_url": "http://x?offset=30"}, 200),
             ({"illusts": fresh1}, 200),
+            ({"illusts": hot2}, 200),  # 轮换深层页
         ])
         c.tokens.update("at", "rt", 3600)
         out = _run(c.search_illust("miku", min_bookmarks=1000, limit=3, premium=True))
         self.assertEqual(len(s.calls), 3)
-        sorts = [call[2]["params"]["sort"] for call in s.calls]
-        self.assertEqual(sorts, ["popular_desc", "popular_desc", "date_desc"])
+        # 第 0 页热门、最新页，以及深层轮换页（offset 必为 30/60/90 之一）
+        self.assertEqual(s.calls[0][2]["params"]["sort"], "popular_desc")
+        self.assertNotIn("offset", s.calls[0][2]["params"])
+        self.assertEqual(s.calls[1][2]["params"]["sort"], "date_desc")
+        self.assertEqual(s.calls[2][2]["params"]["sort"], "popular_desc")
+        self.assertIn(s.calls[2][2]["params"].get("offset"), (30, 60, 90))
         ids = [r["id"] for r in out]
         # 热门按收藏排序后 [32,33,34,31]：首位=最热，中段取一张，再补一张最新
         self.assertEqual(ids[0], 32)
         self.assertIn(35, ids)
         self.assertEqual(len(set(ids)), 3)
+
+    def test_premium_balanced_small_pool(self):
+        # 结果很少（无 next_url）：只请求热门第 0 页 + 最新页，不越界追深层页
+        items = [
+            make_illust(41, bookmarks=9000), make_illust(42, bookmarks=8000),
+            make_illust(43, bookmarks=7000), make_illust(44, bookmarks=6000),
+            make_illust(45, bookmarks=5000),
+        ]
+        fresh1 = [make_illust(46, bookmarks=2000)]
+        c, s = self._client([
+            ({"illusts": items, "next_url": None}, 200),
+            ({"illusts": fresh1}, 200),
+        ])
+        c.tokens.update("at", "rt", 3600)
+        out = _run(c.search_illust("rare_tag", min_bookmarks=1000, limit=3, premium=True))
+        self.assertEqual(len(s.calls), 2)  # 没有深层页请求
+        ids = [r["id"] for r in out]
+        # [41..45] 排序降序：首位 41，中段步进取 44，再补最新 46
+        self.assertEqual(ids, [41, 44, 46])
+
+    def test_premium_balanced_extra_empty(self):
+        # 深层轮换页越界/为空：静默回退到第 0 页池，不报错
+        items = [
+            make_illust(51, bookmarks=9000), make_illust(52, bookmarks=8000),
+            make_illust(53, bookmarks=7000),
+        ]
+        fresh1 = [make_illust(56, bookmarks=2000)]
+        c, s = self._client([
+            ({"illusts": items, "next_url": "http://x?offset=30"}, 200),
+            ({"illusts": fresh1}, 200),
+            ({"illusts": [], "next_url": None}, 200),  # 深层页空
+        ])
+        c.tokens.update("at", "rt", 3600)
+        out = _run(c.search_illust("small_tag", min_bookmarks=1000, limit=3, premium=True))
+        self.assertEqual(len(s.calls), 3)
+        self.assertEqual([r["id"] for r in out], [51, 53, 56])
 
     def test_premium_strict_single_page(self):
         # 关闭均衡混排：单页直取，保持 API 热门顺序（旧行为）

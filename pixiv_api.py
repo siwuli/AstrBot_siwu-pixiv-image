@@ -440,26 +440,35 @@ class PixivClient:
         # 会员（premium=True）+ 热门排序：popular_desc 后端直接生效
         if premium and sort == "popular_desc":
             if balanced:
-                # 均衡混排：热门两页（起点按小时轮换）+ 最新一页，混合采样，
-                # 避免每次都是同一批顶级图，同时让新发布的好图有机会出现。
-                rot = _hour_rotation(word)
-                all_params = [
-                    search_params(word, scope=scope, sort="popular_desc", filter_ai=filter_ai, offset=rot),
-                    search_params(word, scope=scope, sort="popular_desc", filter_ai=filter_ai, offset=rot + 30),
-                    search_params(word, scope=scope, sort="date_desc", filter_ai=filter_ai, offset=0),
-                ]
-                resp_list = await asyncio.gather(*(
-                    self._request("GET", f"{APP_API_HOST}/v1/search/illust", params=p)
-                    for p in all_params
-                ))
-                raw_hot: list[dict] = []
-                raw_fresh: list[dict] = []
-                for i, resp in enumerate(resp_list):
-                    page = resp.get("illusts") or []
-                    if i < 2:
-                        raw_hot.extend(page)
-                    else:
-                        raw_fresh.extend(page)
+                # 均衡混排：热门第 0 页保底 + 最新一页并发请求；
+                # 仅当热门结果还有下一页（next_url 存在）时，才按小时轮换的偏移
+                # （30/60/90）追加深层页——结果很少的词不会越界拉空页。
+                base_params = search_params(
+                    word, scope=scope, sort="popular_desc", filter_ai=filter_ai, offset=0,
+                )
+                fresh_params = search_params(
+                    word, scope=scope, sort="date_desc", filter_ai=filter_ai, offset=0,
+                )
+                resp_base, resp_fresh = await asyncio.gather(
+                    self._request("GET", f"{APP_API_HOST}/v1/search/illust", params=base_params),
+                    self._request("GET", f"{APP_API_HOST}/v1/search/illust", params=fresh_params),
+                )
+                raw_hot: list[dict] = resp_base.get("illusts") or []
+                raw_fresh: list[dict] = resp_fresh.get("illusts") or []
+                if resp_base.get("next_url"):
+                    # 有更多结果才追加轮换页；越界/空页等异常静默忽略，回退单页保底
+                    rot = _hour_rotation(word)
+                    try:
+                        extra_params = search_params(
+                            word, scope=scope, sort="popular_desc",
+                            filter_ai=filter_ai, offset=rot + 30,
+                        )
+                        resp_extra = await self._request(
+                            "GET", f"{APP_API_HOST}/v1/search/illust", params=extra_params,
+                        )
+                        raw_hot.extend(resp_extra.get("illusts") or [])
+                    except PixivError as exc:
+                        logger.debug(f"[pixiv] balanced extra page skipped: {exc}")
                 hot = filter_illusts(raw_hot, r18_level, min_bookmarks, filter_ai, None)
                 hot.sort(key=lambda x: x["bookmarks"], reverse=True)
                 fresh = filter_illusts(raw_fresh, r18_level, min_bookmarks, filter_ai, None)
