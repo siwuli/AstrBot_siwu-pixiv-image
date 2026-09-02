@@ -4,6 +4,7 @@
 import asyncio
 import json
 import os
+import random
 import tempfile
 import time
 import unittest
@@ -20,13 +21,12 @@ from pixiv_api import (
     PixivClient,
     PixivError,
     TokenStore,
-    _hour_rotation,
     extract_illust_id,
     filter_illusts,
     oauth_headers,
     parse_illust,
     ranking_params,
-    sample_balanced,
+    sample_random,
     search_params,
     user_illusts_params,
 )
@@ -247,57 +247,34 @@ class TestStripImageMetadata(unittest.TestCase):
             os.unlink(path)
 
 
-class TestSampleBalanced(unittest.TestCase):
-    def _hot(self, ids):
-        return [make_illust(i, bookmarks=10000 - i * 100) for i in ids]
+class TestSampleRandom(unittest.TestCase):
+    def _pool(self, ids):
+        return [parse_illust(make_illust(i, bookmarks=10000 - i * 100)) for i in ids]
 
     def test_small_pool_takes_all(self):
-        hot = self._hot([1, 2, 3])
-        out = sample_balanced(hot, [], 5)
+        pool = self._pool([1, 2, 3])
+        out = sample_random(pool, 5)
         self.assertEqual([r["id"] for r in out], [1, 2, 3])
 
-    def test_first_is_hot_top(self):
-        hot = self._hot([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-        out = sample_balanced(hot, [], 3)
-        self.assertEqual(out[0]["id"], 1)
-
-    def test_fresh_not_used_when_hot_sufficient(self):
-        # 热门池充足（10 条取 3）：全部来自热门池，不混最新新作
-        hot = self._hot([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-        fresh = self._hot([101])
-        out = sample_balanced(hot, fresh, 3)
-        # 首位 1 + 中段步进：rest=[2..10] 取 idx 2/6 → 4、8
-        self.assertEqual([r["id"] for r in out], [1, 4, 8])
-        self.assertNotIn(101, [r["id"] for r in out])
-
-    def test_fresh_backfills_when_hot_short(self):
-        # 热门只剩 2 条、要 3 张：热门补满后用最新候选补齐
-        hot = self._hot([1, 2])
-        fresh = self._hot([101])
-        out = sample_balanced(hot, fresh, 3)
-        self.assertEqual([r["id"] for r in out], [1, 2, 101])
-
-    def test_fresh_skips_duplicate_when_backfilling(self):
-        hot = self._hot([1])
-        fresh = self._hot([1, 101])  # 1 已在热门中出现
-        out = sample_balanced(hot, fresh, 3)
+    def test_random_subset_keeps_order(self):
+        # 随机抽取仍保持池内原顺序（收藏降序的子序列），且不固定首位
+        pool = self._pool(list(range(1, 11)))
+        rng = random.Random(42)
+        out = sample_random(pool, 3, rng=rng)
         ids = [r["id"] for r in out]
-        self.assertEqual(ids, [1, 101])
-        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(len(ids), 3)
+        self.assertEqual(len(set(ids)), 3)
+        # 结果必须是池顺序递增的子序列（书签严格递减）
+        bm = [r["bookmarks"] for r in out]
+        self.assertEqual(bm, sorted(bm, reverse=True))
+        self.assertTrue(all(i in [x["id"] for x in pool] for i in ids))
 
-    def test_empty_hot_uses_fresh(self):
-        out = sample_balanced([], self._hot([201, 202]), 3)
-        self.assertEqual([r["id"] for r in out], [201, 202])
+    def test_limit_1(self):
+        out = sample_random(self._pool([1, 2, 3]), 1)
+        self.assertEqual(len(out), 1)
 
-    def test_zero_hot_zero_fresh(self):
-        self.assertEqual(sample_balanced([], [], 3), [])
-
-    def test_hour_rotation_stable_and_in_range(self):
-        a = _hour_rotation("miku")
-        b = _hour_rotation("miku")
-        self.assertEqual(a, b)
-        self.assertEqual(a % 30, 0)
-        self.assertIn(a, (0, 30, 60))
+    def test_empty_pool(self):
+        self.assertEqual(sample_random([], 3), [])
 
 
 class TestParams(unittest.TestCase):
@@ -472,80 +449,47 @@ class TestPixivClient(unittest.TestCase):
         out = _run(c.search_illust("x", min_bookmarks=0, limit=5))
         self.assertEqual([r["id"] for r in out], [22, 23, 21])
 
-    def test_premium_balanced_mix(self):
-        # 默认均衡混排：第 0 页热门 + 最新一页并发；热门还有下一页才追加轮换页
-        hot1 = [make_illust(31, bookmarks=5000), make_illust(32, bookmarks=8000)]
-        hot2 = [make_illust(33, bookmarks=7000), make_illust(34, bookmarks=6000)]
-        fresh1 = [make_illust(35, bookmarks=2000)]
-        c, s = self._client([
-            ({"illusts": hot1, "next_url": "http://x?offset=30"}, 200),
-            ({"illusts": fresh1}, 200),
-            ({"illusts": hot2}, 200),  # 轮换深层页
-        ])
+    def test_premium_random(self):
+        # 默认随机模式：单页热门 + 从合规候选随机抽取（不固定首位）
+        items = [
+            make_illust(31, bookmarks=5000), make_illust(32, bookmarks=8000),
+            make_illust(33, bookmarks=7000), make_illust(34, bookmarks=6000),
+        ]
+        c, s = self._client([({"illusts": items}, 200)])
         c.tokens.update("at", "rt", 3600)
         out = _run(c.search_illust("miku", min_bookmarks=1000, limit=3, premium=True))
-        self.assertEqual(len(s.calls), 3)
-        # 第 0 页热门、最新页，以及深层轮换页（offset 必为 30/60/90 之一）
+        self.assertEqual(len(s.calls), 1)  # 只请求一页热门
         self.assertEqual(s.calls[0][2]["params"]["sort"], "popular_desc")
         self.assertNotIn("offset", s.calls[0][2]["params"])
-        self.assertEqual(s.calls[1][2]["params"]["sort"], "date_desc")
-        self.assertEqual(s.calls[2][2]["params"]["sort"], "popular_desc")
-        self.assertIn(s.calls[2][2]["params"].get("offset"), (30, 60, 90))
         ids = [r["id"] for r in out]
-        # 热门按收藏排序后 [32,33,34,31]：首位=最热 + 中段步进取 33/31
-        self.assertEqual(ids, [32, 33, 31])
-        # 热门池充足：不混入最新新作（35 不出现在结果里）
-        self.assertNotIn(35, ids)
+        self.assertEqual(len(ids), 3)
         self.assertEqual(len(set(ids)), 3)
+        self.assertTrue(all(i in {31, 32, 33, 34} for i in ids))
+        # 随机抽取保持池内排序（书签降序的子序列）
+        bm = [r["bookmarks"] for r in out]
+        self.assertEqual(bm, sorted(bm, reverse=True))
 
     def test_premium_balanced_small_pool(self):
-        # 结果很少（无 next_url）：只请求热门第 0 页 + 最新页，不越界追深层页
+        # 候选池小于 limit：全部返回，不重复不报错
         items = [
             make_illust(41, bookmarks=9000), make_illust(42, bookmarks=8000),
-            make_illust(43, bookmarks=7000), make_illust(44, bookmarks=6000),
-            make_illust(45, bookmarks=5000),
+            make_illust(43, bookmarks=7000),
         ]
-        fresh1 = [make_illust(46, bookmarks=2000)]
-        c, s = self._client([
-            ({"illusts": items, "next_url": None}, 200),
-            ({"illusts": fresh1}, 200),
-        ])
+        c, s = self._client([({"illusts": items}, 200)])
         c.tokens.update("at", "rt", 3600)
-        out = _run(c.search_illust("rare_tag", min_bookmarks=1000, limit=3, premium=True))
-        self.assertEqual(len(s.calls), 2)  # 没有深层页请求
-        ids = [r["id"] for r in out]
-        # [41..45] 排序降序：首位 41，中段步进取 43/45
-        self.assertEqual(ids, [41, 43, 45])
+        out = _run(c.search_illust("rare_tag", min_bookmarks=1000, limit=5, premium=True))
+        self.assertEqual(len(s.calls), 1)
+        self.assertEqual([r["id"] for r in out], [41, 42, 43])
 
-    def test_premium_balanced_fresh_backfill(self):
-        # 热门池不足（1 条 < limit 3）：最新候选兜底补齐
-        items = [make_illust(61, bookmarks=9000)]
-        fresh1 = [make_illust(66, bookmarks=2000), make_illust(67, bookmarks=1000)]
-        c, s = self._client([
-            ({"illusts": items, "next_url": None}, 200),
-            ({"illusts": fresh1}, 200),
-        ])
+    def test_premium_random_relaxes_threshold(self):
+        # 门槛过严时软降级后随机：候选来自降级池
+        items = [make_illust(61, bookmarks=100), make_illust(62, bookmarks=90)]
+        c, s = self._client([({"illusts": items}, 200)])
         c.tokens.update("at", "rt", 3600)
         out = _run(c.search_illust("tiny_tag", min_bookmarks=1000, limit=3, premium=True))
-        self.assertEqual(len(s.calls), 2)
-        self.assertEqual([r["id"] for r in out], [61, 66, 67])
-
-    def test_premium_balanced_extra_empty(self):
-        # 深层轮换页越界/为空：静默回退到第 0 页池，不报错
-        items = [
-            make_illust(51, bookmarks=9000), make_illust(52, bookmarks=8000),
-            make_illust(53, bookmarks=7000),
-        ]
-        fresh1 = [make_illust(56, bookmarks=2000)]
-        c, s = self._client([
-            ({"illusts": items, "next_url": "http://x?offset=30"}, 200),
-            ({"illusts": fresh1}, 200),
-            ({"illusts": [], "next_url": None}, 200),  # 深层页空
-        ])
-        c.tokens.update("at", "rt", 3600)
-        out = _run(c.search_illust("small_tag", min_bookmarks=1000, limit=3, premium=True))
-        self.assertEqual(len(s.calls), 3)
-        self.assertEqual([r["id"] for r in out], [51, 52, 53])
+        self.assertEqual(len(s.calls), 1)
+        ids = {r["id"] for r in out}
+        self.assertTrue({61, 62}.issuperset(ids))
 
     def test_premium_strict_single_page(self):
         # 关闭均衡混排：单页直取，保持 API 热门顺序（旧行为）
@@ -555,7 +499,7 @@ class TestPixivClient(unittest.TestCase):
         out = _run(c.search_illust("miku", min_bookmarks=1000, limit=5, premium=True, balanced=False))
         self.assertEqual(len(s.calls), 1)
         self.assertEqual(s.calls[0][2]["params"]["sort"], "popular_desc")
-        self.assertEqual([r["id"] for r in out], [31, 32])  # API 顺序保留
+        self.assertEqual([r["id"] for r in out], [32, 31])  # 按收藏热度降序
 
     def test_date_desc_keeps_order(self):
         items = [make_illust(41, bookmarks=50), make_illust(42, bookmarks=9000), make_illust(43, bookmarks=500)]
