@@ -369,10 +369,20 @@ class PixivClient:
         filter_ai: bool = True,
         limit: int = 5,
         offset: int = 0,
+        premium: bool = False,
     ) -> list[dict[str, Any]]:
         await self.ensure_auth()
-        # popular_desc 是会员专属排序（非会员会被静默降级为最新），
-        # 因此拉取两页后由客户端按收藏数降序排序兜底，保证“相对热门”。
+        # 会员（premium=True）+ 热门排序：popular_desc 后端直接生效，单页直取
+        if premium and sort == "popular_desc":
+            params = search_params(word, scope=scope, sort=sort, filter_ai=filter_ai, offset=offset)
+            resp = await self._request("GET", f"{APP_API_HOST}/v1/search/illust", params=params)
+            items = resp.get("illusts") or []
+            out = filter_illusts(items, r18_level, min_bookmarks, filter_ai, None)
+            if not out and min_bookmarks > 0:
+                out = filter_illusts(items, r18_level, 0, filter_ai, None)
+            return out[: max(1, int(limit))]
+        # 非会员（或 date 排序）：popular_desc 会被静默降级为最新，
+        # 拉两页后由客户端按收藏数降序兜底；date_desc 保持 API 顺序（最新）。
         items: list[dict] = []
         for off in (offset, offset + 30):
             params = search_params(word, scope=scope, sort=sort, filter_ai=filter_ai, offset=off)
@@ -382,11 +392,13 @@ class PixivClient:
             if not resp.get("next_url"):
                 break
         out = filter_illusts(items, r18_level, min_bookmarks, filter_ai, None)
-        out.sort(key=lambda x: x["bookmarks"], reverse=True)
-        if not out and min_bookmarks > 0:
-            # 软降级：门槛过严/非会员排序受限时，退而展示相对最热候选
-            out = filter_illusts(items, r18_level, 0, filter_ai, None)
+        if sort == "popular_desc":
             out.sort(key=lambda x: x["bookmarks"], reverse=True)
+        if not out and min_bookmarks > 0:
+            # 软降级：门槛过严/排序受限时，退而展示相对最热候选
+            out = filter_illusts(items, r18_level, 0, filter_ai, None)
+            if sort == "popular_desc":
+                out.sort(key=lambda x: x["bookmarks"], reverse=True)
         return out[: max(1, int(limit))]
 
     async def illust_ranking(

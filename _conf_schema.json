@@ -70,5 +70,11 @@
     "hint": "留空=任何群都不能开；私聊不受此限制",
     "type": "string",
     "default": ""
+  },
+  "pixiv_premium": {
+    "description": "Pixiv 高级会员（Premium）",
+    "hint": "会员账号搜索时使用后端热门排序（popular_desc），单页直取高收藏作品；非会员关闭此选项，插件拉取两页后按收藏数降序兜底",
+    "type": "bool",
+    "default": false
   }
 }

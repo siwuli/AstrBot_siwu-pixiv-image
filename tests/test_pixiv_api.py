@@ -299,6 +299,22 @@ class TestPixivClient(unittest.TestCase):
         out = _run(c.search_illust("x", min_bookmarks=0, limit=5))
         self.assertEqual([r["id"] for r in out], [22, 23, 21])
 
+    def test_premium_single_page(self):
+        items = [make_illust(31, bookmarks=5000), make_illust(32, bookmarks=8000)]
+        c, s = self._client([({"illusts": items}, 200), ({"illusts": items}, 200)])
+        c.tokens.update("at", "rt", 3600)
+        out = _run(c.search_illust("miku", min_bookmarks=1000, limit=5, premium=True))
+        self.assertEqual(len(s.calls), 1)  # 会员热门模式只请求一页
+        self.assertEqual(s.calls[0][2]["params"]["sort"], "popular_desc")
+        self.assertEqual([r["id"] for r in out], [31, 32])  # API 顺序保留
+
+    def test_date_desc_keeps_order(self):
+        items = [make_illust(41, bookmarks=50), make_illust(42, bookmarks=9000), make_illust(43, bookmarks=500)]
+        c, _s = self._client([({"illusts": items}, 200), ({"illusts": [], "next_url": None}, 200)])
+        c.tokens.update("at", "rt", 3600)
+        out = _run(c.search_illust("x", sort="date_desc", min_bookmarks=0, limit=5))
+        self.assertEqual([r["id"] for r in out], [41, 42, 43])  # date_desc 保持 API 顺序
+
     def test_ranking(self):
         c, s = self._client([({"illusts": [make_illust()]}, 200)])
         c.tokens.update("at", "rt", 3600)

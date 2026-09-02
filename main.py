@@ -213,6 +213,7 @@ class PixivImagePlugin(star.Star):
                 keyword, scope=scope, sort=sort,
                 min_bookmarks=self._min_bookmarks(), r18_level=await self._session_r18_level(event),
                 filter_ai=bool(self._cfg("pixiv_filter_ai", True)), limit=self._max_results(),
+                premium=bool(self._cfg("pixiv_premium", False)),
             )
         except PixivError as exc:
             logger.error(f"[pixiv_image] search failed: {exc}")
@@ -225,7 +226,8 @@ class PixivImagePlugin(star.Star):
         top_bm = results[0]["bookmarks"] if results else 0
         hint = ""
         if top_bm < self._min_bookmarks():
-            hint = "（提示：当前账号非会员无法用热门排序，以下为近期作品中收藏最高的候选，收藏数未达门槛）"
+            premium_on = bool(self._cfg("pixiv_premium", False))
+            hint = "（提示：收藏数未达门槛；非会员账号热门排序受限时仅为近期相对热门候选，可在配置中开启 pixiv_premium 使用高级排序）" if not premium_on else "（提示：收藏数未达门槛）"
         yield self._format_results(results, f"Pixiv 搜索「{keyword}」{hint}", sent)
 
     # ------------------------------------------------------------------
