@@ -279,7 +279,7 @@ class TestPixivClient(unittest.TestCase):
         )
         self.assertEqual([r["id"] for r in out], [1])
         _, url, kwargs = s.calls[0]
-        self.assertEqual(url, f"{APP_API_HOST}/v1/illust/search")
+        self.assertEqual(url, f"{APP_API_HOST}/v1/search/illust")
         self.assertEqual(kwargs["proxy"], "http://127.0.0.1:7890")
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer at")
         self.assertEqual(kwargs["params"]["word"], "miku")

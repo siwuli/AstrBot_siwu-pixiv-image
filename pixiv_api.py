@@ -371,7 +371,7 @@ class PixivClient:
     ) -> list[dict[str, Any]]:
         await self.ensure_auth()
         params = search_params(word, scope=scope, sort=sort, filter_ai=filter_ai, offset=offset)
-        resp = await self._request("GET", f"{APP_API_HOST}/v1/illust/search", params=params)
+        resp = await self._request("GET", f"{APP_API_HOST}/v1/search/illust", params=params)
         items = resp.get("illusts") or []
         return filter_illusts(items, r18_level, min_bookmarks, filter_ai, limit)
 
