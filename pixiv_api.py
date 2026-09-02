@@ -61,7 +61,7 @@ RANK_MODES: dict[str, str] = {
 SEARCH_TARGETS: dict[str, str] = {
     "tag": "partial_match_for_tags",
     "title": "title_and_caption",
-    "both": "partial_match_for_tags_and_title_and_caption",
+    "both": "partial_match_for_tags",
 }
 
 _ARTWORK_RE = re.compile(r"pixiv\.net/(?:en/)?(?:artworks|i)/?(\d+)", re.IGNORECASE)
@@ -191,8 +191,9 @@ def search_params(word: str, scope: str = "tag", sort: str = "popular_desc",
         "sort": sort if sort in ("popular_desc", "date_desc", "date_asc") else "popular_desc",
         "filter": "for_android",
     }
-    if filter_ai:
-        params["search_ai_type"] = 0
+    # search_ai_type 只接受 1（包含 AI 作品）；0 会触发 400，省略即走服务器默认（过滤 AI）
+    if not filter_ai:
+        params["search_ai_type"] = 1
     if offset > 0:
         params["offset"] = offset
     return params

@@ -164,14 +164,14 @@ class TestParams(unittest.TestCase):
         self.assertEqual(p["word"], "miku")
         self.assertEqual(p["search_target"], "partial_match_for_tags")
         self.assertEqual(p["sort"], "popular_desc")
-        self.assertEqual(p["search_ai_type"], 0)
+        self.assertNotIn("search_ai_type", p)
         self.assertEqual(p["filter"], "for_android")
 
     def test_search_params_scope_and_sort(self):
         self.assertEqual(search_params("x", scope="title")["search_target"], "title_and_caption")
-        self.assertEqual(search_params("x", scope="both")["search_target"], "partial_match_for_tags_and_title_and_caption")
+        self.assertEqual(search_params("x", scope="both")["search_target"], "partial_match_for_tags")
         self.assertEqual(search_params("x", sort="bogus")["sort"], "popular_desc")
-        self.assertNotIn("search_ai_type", search_params("x", filter_ai=False))
+        self.assertEqual(search_params("x", filter_ai=False)["search_ai_type"], 1)
         self.assertEqual(search_params("x", offset=30)["offset"], 30)
 
     def test_ranking_params(self):
