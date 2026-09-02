@@ -284,6 +284,21 @@ class TestPixivClient(unittest.TestCase):
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer at")
         self.assertEqual(kwargs["params"]["word"], "miku")
 
+    def test_search_relaxes_threshold(self):
+        items = [make_illust(11, bookmarks=100, x_restrict=0), make_illust(12, bookmarks=50, x_restrict=0)]
+        c, _s = self._client([({"illusts": items}, 200), ({"illusts": [], "next_url": None}, 200)])
+        c.tokens.update("at", "rt", 3600)
+        out = _run(c.search_illust("miku", min_bookmarks=1000, limit=5))
+        self.assertEqual(len(out), 2)
+        self.assertEqual([r["id"] for r in out], [11, 12])  # 软降级后按收藏降序
+
+    def test_search_sorted_by_bookmarks(self):
+        items = [make_illust(21, bookmarks=50), make_illust(22, bookmarks=9000), make_illust(23, bookmarks=500)]
+        c, _s = self._client([({"illusts": items}, 200), ({"illusts": [], "next_url": None}, 200)])
+        c.tokens.update("at", "rt", 3600)
+        out = _run(c.search_illust("x", min_bookmarks=0, limit=5))
+        self.assertEqual([r["id"] for r in out], [22, 23, 21])
+
     def test_ranking(self):
         c, s = self._client([({"illusts": [make_illust()]}, 200)])
         c.tokens.update("at", "rt", 3600)

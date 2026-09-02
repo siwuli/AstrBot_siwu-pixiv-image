@@ -222,7 +222,11 @@ class PixivImagePlugin(star.Star):
             yield f"关键词「{keyword}」没有找到满足条件的结果（R18 档位={await self._session_r18_level(event)}，最低收藏 {self._min_bookmarks()}）。可尝试换关键词或放宽门槛。"
             return
         sent = await self._send_illust_images(event, client, results)
-        yield self._format_results(results, f"Pixiv 搜索「{keyword}」", sent)
+        top_bm = results[0]["bookmarks"] if results else 0
+        hint = ""
+        if top_bm < self._min_bookmarks():
+            hint = "（提示：当前账号非会员无法用热门排序，以下为近期作品中收藏最高的候选，收藏数未达门槛）"
+        yield self._format_results(results, f"Pixiv 搜索「{keyword}」{hint}", sent)
 
     # ------------------------------------------------------------------
     # 工具 2：排行榜
