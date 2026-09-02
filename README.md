@@ -35,6 +35,7 @@
 | `pixiv_rank_default` | 默认排行模式 | daily |
 | `pixiv_filter_ai` | 过滤 AI 作品 | true |
 | `pixiv_send_original` | 发送原图（关闭则发 1200px 大图） | false |
+| `pixiv_send_fallback` | 原图下载/发送失败时自动降级 1200px 大图重试（只切换官方缩略图档位，不改图） | true |
 | `pixiv_premium` | Pixiv 高级会员：开启后搜索使用后端热门排序（popular_desc）单页直取；关闭则拉两页按收藏降序兜底（非会员限制） | false |
 | `pixiv_search_balanced` | 热门搜索均衡混排（热门头部+中段+最新新作，按小时轮换）；关闭则严格按收藏热度返回 | true |
 
@@ -115,6 +116,7 @@ python build.py                           # 产出 dist/siwu-pixiv-image-0.1.0.z
 
 ## 版本历史
 
+- v0.2.19：发送健壮性：原图下载/发送失败时自动降级为 1200px 大图重发一次（新增 `pixiv_send_fallback` 配置，默认开），解决 QQ 对大图/特殊格式偶发拒绝；不做任何像素级改动。
 - v0.2.18：修复 only/gonly 档位被会话状态存储静默丢弃（R18StateStore 只接受三档）——「/pixiv r18 only」此前显示开启但实际未生效，仍会混入一般向作品。
 - v0.2.17：新增「只发 R-18」模式：`/pixiv r18 only`（只 R-18）/ `/pixiv r18 gonly`（只 R-18G），搜索与排行按档位严格过滤。
 - v0.2.16：修复命令无响应：指令处理改用 AstrBot 标准写法（stop_event + make_result），命令结果不再被 LLM 抢答覆盖。

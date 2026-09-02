@@ -59,6 +59,12 @@
     "type": "bool",
     "default": false
   },
+  "pixiv_send_fallback": {
+    "description": "原图失败自动降级重发",
+    "hint": "开启（默认）：发送原图失败（如平台拒绝大图）时自动改用 1200px 大图重发一次；关闭则失败即跳过",
+    "type": "bool",
+    "default": true
+  },
   "pixiv_r18_owners": {
     "description": "R18 白名单账号（QQ号，逗号分隔）",
     "hint": "只有这些账号能用 /pixiv r18 on 开启本会话 R-18；群主/管理员身份不生效",
