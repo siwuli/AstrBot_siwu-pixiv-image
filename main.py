@@ -3,7 +3,7 @@
 
 按「多工具 + LLM 路由」设计，拆成四个 Agent 工具，由 LLM 根据用户需求自动选择：
 
-- siwu_pixiv_search    → 关键词搜图（默认均衡混排 + 最低收藏门槛）
+- siwu_pixiv_search    → 关键词搜图（默认热门候选随机抽取 + 最低收藏门槛）
 - siwu_pixiv_ranking   → 每日/每周/每月排行榜（用户没指定具体图时用热门榜）
 - siwu_pixiv_artist    → 找指定画师的作品
 - siwu_pixiv_detail    → 指定 pixiv 作品链接/ID 查详情
