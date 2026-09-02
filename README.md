@@ -84,7 +84,7 @@ gppt 会打印一个授权链接：用浏览器打开 → 登录（小号）→ 
 - 「来几张 miku 的图」→ siwu_pixiv_search
 - 「画师 望月けい 的作品」→ siwu_pixiv_artist
 - 「https://www.pixiv.net/artworks/123456」→ siwu_pixiv_detail
-- 兜底命令：`/pixiv miku`（搜图）、`/pixiv 排行`（排行榜）
+- 指令：`/pixiv search miku`（搜图）、`/pixiv rank`（排行榜）、`/pixiv help`（全部指令）、`/pixiv r18 on|all|off|status`（会话级 R18，仅白名单账号）
 
 ## 发图机制
 
@@ -114,6 +114,7 @@ python build.py                           # 产出 dist/siwu-pixiv-image-0.1.0.z
 
 ## 版本历史
 
+- v0.2.15：命令重构为 AstrBot 标准指令组（command_group + 子指令）：`/pixiv r18|search|rank|help`，子指令在指令列表/帮助中独立可见，参数按官方方式解析。
 - v0.2.14：修复 /pixiv 命令触发「ToolSet object has no attribute remove」：意图钩子改用 ToolSet.remove_tool() API（兼容旧版 list.remove）。
 - v0.2.13：修复 /pixiv 带参数命令报「_empty() takes no arguments」：命令参数改用 GreedyStr 注解（AstrBot 参数解析会将无注解 `*args` 当作 inspect.Parameter.empty 调用导致异常）。
 - v0.2.12：命令帮助完善：/pixiv 注册描述（指令列表可见子命令），支持 /pixiv help 输出全部子命令用法（含 R18 会话级开关）。

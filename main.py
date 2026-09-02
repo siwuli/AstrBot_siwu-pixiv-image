@@ -32,7 +32,6 @@ from astrbot.api.all import AstrBotConfig, AstrMessageEvent, llm_tool
 from astrbot.api.event import MessageChain, filter
 from astrbot.api.message_components import Image as ComponentImage
 from astrbot.api.provider import ProviderRequest
-from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .pixiv_api import (
@@ -465,51 +464,52 @@ class PixivImagePlugin(star.Star):
         yield f"已开启本会话 {label}。关闭请发 /pixiv r18 off"
 
     # ------------------------------------------------------------------
-    # 命令兜底：/pixiv 关键词 或 /pixiv 排行
+    # 指令组：/pixiv r18 on|all|off|status ｜ /pixiv search 关键词 ｜ /pixiv rank ｜ /pixiv help
     # ------------------------------------------------------------------
-    @filter.command(
-        "pixiv",
-        desc="P站找图：「/pixiv 关键词」搜图｜「/pixiv 排行」排行榜｜"
-        "「/pixiv 作品ID」查详情｜「/pixiv r18 on|all|off|status」"
-        "会话级 R18 开关（仅白名单账号，按会话独立）",
+    @filter.command_group("pixiv")
+    def pixiv(self):
+        """P站找图指令组：R18 会话开关、搜索、排行、帮助。"""
+        return
+
+    @pixiv.command(
+        "r18",
+        desc="会话级 R18 开关（仅白名单账号）：on=开启R-18 / all=R-18G全放行 / off=关闭 / status=查看",
     )
-    async def pixiv_command(self, event: AstrMessageEvent, args: GreedyStr):
-        parts = [str(a).strip() for a in (args or "").split() if str(a).strip()]
-        if parts and parts[0].lower() == "r18":
-            async for chunk in self._cmd_r18(event, parts):
-                yield chunk
+    async def pixiv_r18(self, event: AstrMessageEvent, args: str = ""):
+        """子命令：/pixiv r18 status|on|all|off（按会话独立，权限走白名单）"""
+        parts = ["r18"]
+        if args:
+            parts.extend(str(args).split())
+        async for chunk in self._cmd_r18(event, parts):
+            yield chunk
+
+    @pixiv.command("search", desc="关键词搜图，如 /pixiv search miku")
+    async def pixiv_search_cmd(self, event: AstrMessageEvent, keyword: str = ""):
+        if not (keyword or "").strip():
+            yield "用法：/pixiv search 关键词（如 /pixiv search miku）"
             return
-        if parts and parts[0].lower() in ("help", "帮助", "?"):
-            yield (
-                "P站找图指令：\n"
-                "/pixiv 关键词 —— 搜图（如 /pixiv miku）\n"
-                "/pixiv 排行 —— 今日排行榜\n"
-                "/pixiv 作品ID —— 查指定作品\n"
-                "/pixiv r18 status —— 查看本会话 R-18 档位\n"
-                "/pixiv r18 on —— 开启 R-18（拒绝 R-18G，仅白名单账号）\n"
-                "/pixiv r18 all —— R-18G 全放行（仅白名单账号）\n"
-                "/pixiv r18 off —— 关闭，回落到全局配置（仅白名单账号）\n"
-                "R18 按会话独立：某群/私聊开关互不影响，重启后保留。"
-            )
-            return
-        text = (event.get_message_str() or "").strip()
-        for w in ("pixiv", "P站", "p站"):
-            if text.startswith(w):
-                text = text[len(w):].lstrip(" :：,，")
-                break
-        if not text and parts:
-            text = " ".join(parts)
-        pure_id = re.fullmatch(r"\d{6,9}", text) if text else None
-        if pure_id:
-            async for chunk in self.pixiv_detail(event, pixiv_id=text, note=""):
-                yield chunk
-            return
-        if not text or any(k in text for k in ("排行", "推荐", "热门")):
-            async for chunk in self.pixiv_ranking(event, mode="", note=""):
-                yield chunk
-        else:
-            async for chunk in self.pixiv_search(event, keyword=text, scope="both", sort="popular_desc", note=""):
-                yield chunk
+        async for chunk in self.pixiv_search(
+            event, keyword=keyword.strip(), scope="both", sort="popular_desc", note="",
+        ):
+            yield chunk
+
+    @pixiv.command("rank", desc="今日排行榜")
+    async def pixiv_rank_cmd(self, event: AstrMessageEvent):
+        async for chunk in self.pixiv_ranking(event, mode="", note=""):
+            yield chunk
+
+    @pixiv.command("help", desc="显示全部指令")
+    async def pixiv_help(self, event: AstrMessageEvent):
+        yield (
+            "P站找图指令：\n"
+            "/pixiv search 关键词 —— 搜图（如 /pixiv search miku）\n"
+            "/pixiv rank —— 今日排行榜\n"
+            "/pixiv r18 status —— 查看本会话 R-18 档位\n"
+            "/pixiv r18 on —— 开启 R-18（拒绝 R-18G，仅白名单账号）\n"
+            "/pixiv r18 all —— R-18G 全放行（仅白名单账号）\n"
+            "/pixiv r18 off —— 关闭，回落到全局配置（仅白名单账号）\n"
+            "R18 按会话独立：某群/私聊开关互不影响，重启后保留。"
+        )
 
 
 def _looks_like_name(query: str) -> bool:
