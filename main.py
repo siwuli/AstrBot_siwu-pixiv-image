@@ -474,22 +474,14 @@ class PixivImagePlugin(star.Star):
             return
         if parts and parts[0].lower() in ("help", "帮助", "?"):
             yield (
-                "P站找图指令：
-"
-                "/pixiv 关键词 —— 搜图（如 /pixiv miku）
-"
-                "/pixiv 排行 —— 今日排行榜
-"
-                "/pixiv 作品ID —— 查指定作品
-"
-                "/pixiv r18 status —— 查看本会话 R-18 档位
-"
-                "/pixiv r18 on —— 开启 R-18（拒绝 R-18G，仅白名单账号）
-"
-                "/pixiv r18 all —— R-18G 全放行（仅白名单账号）
-"
-                "/pixiv r18 off —— 关闭，回落到全局配置（仅白名单账号）
-"
+                "P站找图指令：\n"
+                "/pixiv 关键词 —— 搜图（如 /pixiv miku）\n"
+                "/pixiv 排行 —— 今日排行榜\n"
+                "/pixiv 作品ID —— 查指定作品\n"
+                "/pixiv r18 status —— 查看本会话 R-18 档位\n"
+                "/pixiv r18 on —— 开启 R-18（拒绝 R-18G，仅白名单账号）\n"
+                "/pixiv r18 all —— R-18G 全放行（仅白名单账号）\n"
+                "/pixiv r18 off —— 关闭，回落到全局配置（仅白名单账号）\n"
                 "R18 按会话独立：某群/私聊开关互不影响，重启后保留。"
             )
             return
