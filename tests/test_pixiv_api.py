@@ -1,0 +1,316 @@
+# -*- coding: UTF-8 -*-
+"""pixiv_api 模块单元测试（不依赖网络与 astrbot）。"""
+
+import asyncio
+import json
+import os
+import tempfile
+import time
+import unittest
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+from pixiv_api import (
+    APP_API_HOST,
+    OAUTH_HOST,
+    R18_LEVELS,
+    PixivClient,
+    PixivError,
+    TokenStore,
+    extract_illust_id,
+    filter_illusts,
+    oauth_headers,
+    parse_illust,
+    ranking_params,
+    search_params,
+    user_illusts_params,
+)
+
+
+def make_illust(illust_id=123456, title="Test", bookmarks=5000, views=99999,
+                x_restrict=0, tags=None, page_count=1, artist="画师A"):
+    tags = tags if tags is not None else [{"name": "miku", "translated_name": "初音未来"}]
+    base = {
+        "id": illust_id,
+        "title": title,
+        "type": "illust",
+        "x_restrict": x_restrict,
+        "total_bookmarks": bookmarks,
+        "total_view": views,
+        "page_count": page_count,
+        "tags": tags,
+        "user": {"id": 99, "name": artist},
+        "image_urls": {"medium": f"https://i.pximg.net/medium/{illust_id}.jpg",
+                         "large": f"https://i.pximg.net/large/{illust_id}.jpg"},
+        "meta_single_page": {"original_image_url": f"https://i.pximg.net/original/{illust_id}.png"},
+    }
+    if page_count > 1:
+        base["meta_pages"] = [
+            {"image_urls": {"original": f"https://i.pximg.net/original/{illust_id}_p{i}.png"}}
+            for i in range(page_count)
+        ]
+        base["meta_single_page"] = {}
+    return base
+
+
+class TestExtractId(unittest.TestCase):
+    def test_link(self):
+        self.assertEqual(extract_illust_id("https://www.pixiv.net/artworks/123456"), 123456)
+
+    def test_link_en(self):
+        self.assertEqual(extract_illust_id("看看 https://www.pixiv.net/en/artworks/888888 这张"), 888888)
+
+    def test_pure_id(self):
+        self.assertEqual(extract_illust_id("123456"), 123456)
+
+    def test_id_with_text(self):
+        self.assertEqual(extract_illust_id("pixiv 555555 好看"), 555555)
+
+    def test_invalid(self):
+        self.assertIsNone(extract_illust_id("没有数字"))
+        self.assertIsNone(extract_illust_id("123"))
+        self.assertIsNone(extract_illust_id(""))
+
+
+class TestOauthHeaders(unittest.TestCase):
+    def test_structure(self):
+        h = oauth_headers(now_ts=1700000000)
+        self.assertIn("x-client-time", h)
+        self.assertIn("x-client-hash", h)
+        self.assertEqual(h["user-agent"], "PixivIOSApp/7.13.3 (iOS 14.6; iPhone13,2)")
+
+    def test_hash_is_md5_hex(self):
+        h = oauth_headers(now_ts=1700000000)
+        ts = h["x-client-time"]
+        import hashlib
+        expected = hashlib.md5((ts + "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c").encode()).hexdigest()
+        self.assertEqual(h["x-client-hash"], expected)
+
+
+class TestParseIllust(unittest.TestCase):
+    def test_basic(self):
+        item = make_illust()
+        r = parse_illust(item)
+        self.assertEqual(r["id"], 123456)
+        self.assertEqual(r["title"], "Test")
+        self.assertEqual(r["artist"], "画师A")
+        self.assertEqual(r["bookmarks"], 5000)
+        self.assertEqual(r["r18_label"], "一般向")
+        self.assertIn("初音未来", r["tags"])
+        self.assertEqual(r["url"], "https://www.pixiv.net/artworks/123456")
+        self.assertEqual(r["original_url"], "https://i.pximg.net/original/123456.png")
+
+    def test_multipage(self):
+        r = parse_illust(make_illust(page_count=3))
+        self.assertEqual(r["page_count"], 3)
+        self.assertEqual(len(r["pages"]), 3)
+        self.assertIn("_p2.png", r["pages"][2])
+
+    def test_ai_tag_detected(self):
+        r = parse_illust(make_illust(tags=[{"name": "AI-generated"}]))
+        self.assertTrue(r["ai"])
+        r2 = parse_illust(make_illust(tags=[{"name": "original"}]))
+        self.assertFalse(r2["ai"])
+
+    def test_r18_label(self):
+        self.assertEqual(parse_illust(make_illust(x_restrict=1))["r18_label"], "R-18")
+        self.assertEqual(parse_illust(make_illust(x_restrict=2))["r18_label"], "R-18G")
+
+
+class TestFilterIllusts(unittest.TestCase):
+    def setUp(self):
+        self.items = [
+            make_illust(1, "safe1", bookmarks=2000, x_restrict=0),
+            make_illust(2, "r18", bookmarks=3000, x_restrict=1),
+            make_illust(3, "r18g", bookmarks=4000, x_restrict=2),
+            make_illust(4, "low", bookmarks=500, x_restrict=0),
+            make_illust(5, "ai", bookmarks=9000, x_restrict=0, tags=[{"name": "AI生成"}]),
+        ]
+
+    def test_safe_default(self):
+        out = filter_illusts(self.items)
+        ids = [r["id"] for r in out]
+        self.assertIn(1, ids)
+        self.assertNotIn(2, ids)
+        self.assertNotIn(3, ids)
+
+    def test_r18_level(self):
+        out = filter_illusts(self.items, r18_level="r18")
+        self.assertIn(2, [r["id"] for r in out])
+        self.assertNotIn(3, [r["id"] for r in out])
+        out2 = filter_illusts(self.items, r18_level="r18g")
+        self.assertIn(3, [r["id"] for r in out2])
+
+    def test_min_bookmarks(self):
+        out = filter_illusts(self.items, min_bookmarks=1000)
+        self.assertNotIn(4, [r["id"] for r in out])
+        self.assertIn(1, [r["id"] for r in out])
+
+    def test_filter_ai(self):
+        out = filter_illusts(self.items, filter_ai=True)
+        self.assertNotIn(5, [r["id"] for r in out])
+
+    def test_limit(self):
+        out = filter_illusts(self.items, limit=2)
+        self.assertEqual(len(out), 2)
+
+
+class TestParams(unittest.TestCase):
+    def test_search_params(self):
+        p = search_params("miku", scope="tag", sort="popular_desc", filter_ai=True)
+        self.assertEqual(p["word"], "miku")
+        self.assertEqual(p["search_target"], "partial_match_for_tags")
+        self.assertEqual(p["sort"], "popular_desc")
+        self.assertEqual(p["search_ai_type"], 0)
+        self.assertEqual(p["filter"], "for_android")
+
+    def test_search_params_scope_and_sort(self):
+        self.assertEqual(search_params("x", scope="title")["search_target"], "title_and_caption")
+        self.assertEqual(search_params("x", scope="both")["search_target"], "partial_match_for_tags_and_title_and_caption")
+        self.assertEqual(search_params("x", sort="bogus")["sort"], "popular_desc")
+        self.assertNotIn("search_ai_type", search_params("x", filter_ai=False))
+        self.assertEqual(search_params("x", offset=30)["offset"], 30)
+
+    def test_ranking_params(self):
+        self.assertEqual(ranking_params("daily"), {"mode": "day", "filter": "for_android"})
+        self.assertEqual(ranking_params("weekly")["mode"], "week")
+        self.assertEqual(ranking_params("monthly")["mode"], "month")
+        self.assertEqual(ranking_params("daily_r18")["mode"], "day_r18")
+        self.assertEqual(ranking_params("r18g")["mode"], "week_r18g")
+        self.assertEqual(ranking_params("nonsense")["mode"], "day")
+        self.assertEqual(ranking_params("daily", date="2026-09-01")["date"], "2026-09-01")
+
+    def test_user_illusts_params(self):
+        self.assertEqual(user_illusts_params(12345), {"user_id": "12345", "type": "illust"})
+
+
+class TestTokenStore(unittest.TestCase):
+    def test_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "token.json")
+            ts = TokenStore(path, fallback_refresh="rt-1")
+            ts.update("at-1", "rt-2", 3600)
+            ts2 = TokenStore(path)
+            self.assertEqual(ts2.access_token, "at-1")
+            self.assertEqual(ts2.refresh_token, "rt-2")
+            self.assertTrue(ts2.usable())
+
+    def test_usable_expired(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ts = TokenStore(os.path.join(tmp, "t.json"), fallback_refresh="x")
+            ts.update("at", "rt", 3600)
+            ts.expires_at = time.time() - 10
+            self.assertFalse(ts.usable())
+
+    def test_fallback_refresh(self):
+        ts = TokenStore(path=None, fallback_refresh="rt-fallback")
+        self.assertEqual(ts.refresh_token, "rt-fallback")
+        self.assertFalse(ts.usable())
+
+
+class FakeResponse:
+    def __init__(self, payload: dict, status: int = 200):
+        self._payload = payload
+        self.status = status
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def text(self):
+        return json.dumps(self._payload)
+
+
+class FakeSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def request(self, method, url, **kwargs):
+        self.calls.append((method, url, kwargs))
+        if self.responses:
+            payload, status = self.responses.pop(0)
+        else:
+            payload, status = {}, 200
+        return FakeResponse(payload, status)
+
+    def get(self, url, **kwargs):
+        return self.request("GET", url, **kwargs)
+
+    async def close(self):
+        pass
+
+
+class TestPixivClient(unittest.TestCase):
+    def _client(self, responses=None, refresh_token="rt"):
+        session = FakeSession(responses or [({"illusts": [make_illust()]}, 200)])
+        c = PixivClient(refresh_token=refresh_token, proxy="http://127.0.0.1:7890", session=session)
+        return c, session
+
+    def test_refresh_auth(self):
+        token_resp = {"response": {"access_token": "at-new", "refresh_token": "rt-new", "expires_in": 3600}}
+        c, s = self._client([(token_resp, 200), ({"illusts": [make_illust()]}, 200)])
+        _run(c.refresh_auth())
+        self.assertEqual(c.tokens.access_token, "at-new")
+        self.assertEqual(c.tokens.refresh_token, "rt-new")
+        _, url, kwargs = s.calls[0]
+        self.assertEqual(url, f"{OAUTH_HOST}/auth/token")
+        self.assertEqual(kwargs["data"]["grant_type"], "refresh_token")
+        self.assertEqual(kwargs["data"]["refresh_token"], "rt")
+        self.assertIn("x-client-time", kwargs["headers"])
+
+    def test_missing_token_error(self):
+        c, _ = self._client([], refresh_token="")
+        with self.assertRaises(PixivError) as ctx:
+            _run(c.refresh_auth())
+        self.assertIn("refresh_token", str(ctx.exception))
+
+    def test_search_uses_proxy_and_filters(self):
+        items = [make_illust(1, bookmarks=5000, x_restrict=0), make_illust(2, bookmarks=500, x_restrict=0)]
+        c, s = self._client([({"illusts": items}, 200)])
+        c.tokens.update("at", "rt", 3600)
+        out = _run(
+            c.search_illust("miku", min_bookmarks=1000, limit=5)
+        )
+        self.assertEqual([r["id"] for r in out], [1])
+        _, url, kwargs = s.calls[0]
+        self.assertEqual(url, f"{APP_API_HOST}/v1/illust/search")
+        self.assertEqual(kwargs["proxy"], "http://127.0.0.1:7890")
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer at")
+        self.assertEqual(kwargs["params"]["word"], "miku")
+
+    def test_ranking(self):
+        c, s = self._client([({"illusts": [make_illust()]}, 200)])
+        c.tokens.update("at", "rt", 3600)
+        out = _run(c.illust_ranking("daily"))
+        self.assertEqual(len(out), 1)
+        self.assertEqual(s.calls[0][2]["params"]["mode"], "day")
+
+    def test_http_error_raises(self):
+        c, _s = self._client([({"error": {"message": "auth failed"}}, 403)])
+        c.tokens.update("at", "rt", 3600)
+        with self.assertRaises(PixivError) as ctx:
+            _run(c.illust_ranking("daily"))
+        self.assertIn("403", str(ctx.exception))
+
+    def test_detail(self):
+        resp = {"illust": {"illust": make_illust(777)}}
+        c, s = self._client([(resp, 200)])
+        c.tokens.update("at", "rt", 3600)
+        out = _run(c.illust_detail(777))
+        self.assertEqual(out["id"], 777)
+        self.assertEqual(s.calls[0][2]["params"]["illust_id"], "777")
+
+    def test_r18_levels_consistency(self):
+        self.assertEqual(R18_LEVELS["safe"], {0})
+        self.assertEqual(R18_LEVELS["r18"], {0, 1})
+        self.assertEqual(R18_LEVELS["r18g"], {0, 1, 2})
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,62 @@
+{
+  "pixiv_enabled": {
+    "description": "启用兔兔P站找图",
+    "hint": "关闭后 P 站工具与命令不再响应",
+    "type": "bool",
+    "default": true
+  },
+  "pixiv_refresh_token": {
+    "description": "Pixiv refresh_token（登录凭证）",
+    "hint": "用 Pixiv 账号通过 gppt 等工具换取；插件会自动续期并缓存新 token",
+    "type": "string",
+    "default": ""
+  },
+  "pixiv_proxy": {
+    "description": "HTTP 代理地址",
+    "hint": "服务器访问 Pixiv 用，如 http://127.0.0.1:7890；留空则直连",
+    "type": "string",
+    "default": ""
+  },
+  "pixiv_r18_level": {
+    "description": "R18 限制等级",
+    "hint": "safe=仅一般向（默认）；r18=允许R-18但拒绝R-18G；r18g=全放行",
+    "type": "string",
+    "default": "safe"
+  },
+  "pixiv_min_bookmarks": {
+    "description": "最低收藏数门槛",
+    "hint": "搜索类结果低于该收藏数的作品直接剔除（排行榜不受限）",
+    "type": "int",
+    "default": 1000
+  },
+  "pixiv_max_results": {
+    "description": "返回最多结果数",
+    "hint": "搜索/排行最多返回候选条数（1~5）",
+    "type": "int",
+    "default": 3
+  },
+  "pixiv_send_images": {
+    "description": "直发图片数",
+    "hint": "每轮最多直发几张候选图（先发图后文字）",
+    "type": "int",
+    "default": 1
+  },
+  "pixiv_rank_default": {
+    "description": "默认排行模式",
+    "hint": "用户未指定时的排行：daily/weekly/monthly",
+    "type": "string",
+    "default": "daily"
+  },
+  "pixiv_filter_ai": {
+    "description": "过滤 AI 生成作品",
+    "hint": "搜索时排除 AI 作品（search_ai_type=0）",
+    "type": "bool",
+    "default": true
+  },
+  "pixiv_send_original": {
+    "description": "发送原图",
+    "hint": "关闭则发 1200px 大图（更快更小）；开启发原图（可能数MB）",
+    "type": "bool",
+    "default": false
+  }
+}
