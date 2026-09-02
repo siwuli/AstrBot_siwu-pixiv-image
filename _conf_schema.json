@@ -7,7 +7,7 @@
   },
   "pixiv_refresh_token": {
     "description": "Pixiv refresh_token（登录凭证）",
-    "hint": "获取：pip install gppt → gppt configure（填账号密码）→ gppt login --e2e，复制输出的 refresh_token；或 gppt login --oauth 浏览器授权。详见 README",
+    "hint": "获取：pip install gppt → gppt configure（填账号密码）→ gppt login --e2e，复制输出的 refresh_token；或 gppt login --oauth 浏览器授权。更换账号后需删除 data/pixiv_image/token.json 再重启。详见 README",
     "type": "string",
     "default": ""
   },

@@ -265,6 +265,15 @@ class TestTokenStore(unittest.TestCase):
         self.assertEqual(ts.refresh_token, "rt-fallback")
         self.assertFalse(ts.usable())
 
+    def test_cache_overrides_config_but_warns(self):
+        # 缓存与配置不一致（换账号残留/轮换）时：仍以缓存为准但发 warning
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "token.json")
+            ts = TokenStore(path)
+            ts.update("at-cache", "rt-cache", 3600)
+            ts2 = TokenStore(path, fallback_refresh="rt-config")
+            self.assertEqual(ts2.refresh_token, "rt-cache")
+
 
 class FakeResponse:
     def __init__(self, payload: dict, status: int = 200):

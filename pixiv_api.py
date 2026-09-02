@@ -292,8 +292,17 @@ class TokenStore:
         try:
             with open(self.path, encoding="utf-8") as f:
                 d = json.load(f)
+            cached_refresh = str(d.get("refresh_token") or "")
+            if self.refresh_token and cached_refresh and cached_refresh != self.refresh_token:
+                # 配置与缓存不一致：同一账号正常轮换会更新缓存（正常现象）；
+                # 但若刚更换 Pixiv 账号，旧缓存会覆盖新配置导致账号切换不生效，
+                # 需删除 data/pixiv_image/token.json 后重启。
+                logger.warning(
+                    "[pixiv] 配置 refresh_token 与缓存不一致（账号轮换属正常；"
+                    "若刚更换 Pixiv 账号，请删除 data/pixiv_image/token.json 后重启）"
+                )
             self.access_token = str(d.get("access_token") or "")
-            self.refresh_token = str(d.get("refresh_token") or self.refresh_token)
+            self.refresh_token = cached_refresh or self.refresh_token
             self.expires_at = float(d.get("expires_at") or 0)
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"[pixiv] token load failed: {exc}")
