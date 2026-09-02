@@ -114,6 +114,7 @@ python build.py                           # 产出 dist/siwu-pixiv-image-0.1.0.z
 
 ## 版本历史
 
+- v0.2.16：修复命令无响应：指令处理改用 AstrBot 标准写法（stop_event + make_result），命令结果不再被 LLM 抢答覆盖。
 - v0.2.15：命令重构为 AstrBot 标准指令组（command_group + 子指令）：`/pixiv r18|search|rank|help`，子指令在指令列表/帮助中独立可见，参数按官方方式解析。
 - v0.2.14：修复 /pixiv 命令触发「ToolSet object has no attribute remove」：意图钩子改用 ToolSet.remove_tool() API（兼容旧版 list.remove）。
 - v0.2.13：修复 /pixiv 带参数命令报「_empty() takes no arguments」：命令参数改用 GreedyStr 注解（AstrBot 参数解析会将无注解 `*args` 当作 inspect.Parameter.empty 调用导致异常）。

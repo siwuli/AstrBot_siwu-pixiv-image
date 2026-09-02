@@ -480,27 +480,41 @@ class PixivImagePlugin(star.Star):
         parts = ["r18"]
         if args:
             parts.extend(str(args).split())
+        replies = []
         async for chunk in self._cmd_r18(event, parts):
-            yield chunk
+            replies.append(chunk)
+        if replies:
+            event.stop_event()
+            yield event.make_result().message("\n".join(replies))
 
     @pixiv.command("search", desc="关键词搜图，如 /pixiv search miku")
     async def pixiv_search_cmd(self, event: AstrMessageEvent, keyword: str = ""):
         if not (keyword or "").strip():
-            yield "用法：/pixiv search 关键词（如 /pixiv search miku）"
+            event.stop_event()
+            yield event.make_result().message("用法：/pixiv search 关键词（如 /pixiv search miku）")
             return
+        replies = []
         async for chunk in self.pixiv_search(
             event, keyword=keyword.strip(), scope="both", sort="popular_desc", note="",
         ):
-            yield chunk
+            replies.append(chunk)
+        if replies:
+            event.stop_event()
+            yield event.make_result().message("\n".join(replies))
 
     @pixiv.command("rank", desc="今日排行榜")
     async def pixiv_rank_cmd(self, event: AstrMessageEvent):
+        replies = []
         async for chunk in self.pixiv_ranking(event, mode="", note=""):
-            yield chunk
+            replies.append(chunk)
+        if replies:
+            event.stop_event()
+            yield event.make_result().message("\n".join(replies))
 
     @pixiv.command("help", desc="显示全部指令")
     async def pixiv_help(self, event: AstrMessageEvent):
-        yield (
+        event.stop_event()
+        yield event.make_result().message(
             "P站找图指令：\n"
             "/pixiv search 关键词 —— 搜图（如 /pixiv search miku）\n"
             "/pixiv rank —— 今日排行榜\n"
