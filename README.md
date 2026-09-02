@@ -10,7 +10,7 @@
   - `siwu_pixiv_ranking`：每日/每周/每月排行榜（用户没指定目标时发热门榜）
   - `siwu_pixiv_artist`：画师名/IP 搜作品
   - `siwu_pixiv_detail`：pixiv 作品链接/ID 查详情
-- **热门度门槛**：搜索按 `total_bookmarks` 降序，低于 `pixiv_min_bookmarks`（默认 1000）直接剔除
+- **热门度门槛**：搜索按 `total_bookmarks` 降序，低于 `pixiv_min_bookmarks`（默认 1000）直接剔除（会员账号开启 `pixiv_premium` 后由后端热门排序保证；非会员自动拉取两页后客户端按收藏降序，并如实提示未达门槛）
 - **R18 三档**：`safe`（默认，仅一般向）/ `r18`（允许 R-18，拒绝 R-18G）/ `r18g`（全放行）
 - **refresh_token 鉴权**：Pixiv App-API OAuth 自动续期，轮换后的 token 缓存到 AstrBot 数据目录
 - **代理配置**：`pixiv_proxy` 支持 http/https 代理（Clash 混合端口 7890 亦可）
@@ -33,6 +33,7 @@
 | `pixiv_rank_default` | 默认排行模式 | daily |
 | `pixiv_filter_ai` | 过滤 AI 作品 | true |
 | `pixiv_send_original` | 发送原图（关闭则发 1200px 大图） | false |
+| `pixiv_premium` | Pixiv 高级会员：开启后搜索使用后端热门排序（popular_desc）单页直取；关闭则拉两页按收藏降序兜底（非会员限制） | false |
 
 ## 获取 refresh_token（Pixiv App-API 登录凭证）
 
