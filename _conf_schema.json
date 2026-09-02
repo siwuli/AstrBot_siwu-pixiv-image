@@ -58,5 +58,17 @@
     "hint": "关闭则发 1200px 大图（更快更小）；开启发原图（可能数MB）",
     "type": "bool",
     "default": false
+  },
+  "pixiv_r18_owners": {
+    "description": "R18 白名单账号（QQ号，逗号分隔）",
+    "hint": "只有这些账号能用 /pixiv r18 on 开启本会话 R-18；群主/管理员身份不生效",
+    "type": "string",
+    "default": ""
+  },
+  "pixiv_r18_groups": {
+    "description": "允许开启 R18 的群白名单（群号，逗号分隔）",
+    "hint": "留空=任何群都不能开；私聊不受此限制",
+    "type": "string",
+    "default": ""
   }
 }

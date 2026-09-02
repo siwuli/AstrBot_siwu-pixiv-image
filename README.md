@@ -1,6 +1,6 @@
-# 兔兔P站找图（siwu-pixiv-image · AstrBot 插件）
+# P站找图（siwu-pixiv-image · AstrBot 插件）
 
-让兔兔访问 Pixiv 找图：关键词搜图、每日/每周排行榜、画师作品、指定作品详情。
+让机器人访问 Pixiv 找图：关键词搜图、每日/每周排行榜、画师作品、指定作品详情。
 拆成四个 Agent 工具，由 LLM 根据用户提问自动路由（与 siwu-image-search 同一套多工具架构）。
 
 ## 功能特性
@@ -24,7 +24,9 @@
 | `pixiv_enabled` | 启用插件 | true |
 | `pixiv_refresh_token` | Pixiv OAuth refresh_token（必填） | 空 |
 | `pixiv_proxy` | HTTP 代理地址，如 `http://127.0.0.1:7890` | 空（直连） |
-| `pixiv_r18_level` | safe / r18 / r18g | safe |
+| `pixiv_r18_level` | 全局 R18 档位：safe / r18 / r18g | safe |
+| `pixiv_r18_owners` | R18 白名单账号 QQ 号（逗号分隔），只有他们能用 `/pixiv r18 on` 开启 | 空 |
+| `pixiv_r18_groups` | 允许开启 R18 的群号白名单（逗号分隔），空=任何群都不能开；私聊不受限 | 空 |
 | `pixiv_min_bookmarks` | 最低收藏数（搜索/画师工具） | 1000 |
 | `pixiv_max_results` | 返回候选条数 1~5 | 3 |
 | `pixiv_send_images` | 每轮直发图片数 1~5 | 1 |
@@ -40,6 +42,13 @@
 4. 插件首次调用会自动换取 access_token 并缓存（token 轮换后写 `data/pixiv_image/token.json`）。
 
 > 提示：Pixiv 对中国大陆网络不可直连，请务必配置可达的代理；服务器场景建议在本机部署 Clash/mihomo 后填 `http://127.0.0.1:7890`。
+
+## R18 分群管理
+
+- 插件默认 `safe`（仅一般向）；**分群独立控制**：某群/会话的档位由白名单账号用指令切换，状态持久化（重启不丢）；
+- 权限只认配置的 `pixiv_r18_owners` 白名单，**群主/管理员身份不生效**；群聊还需群号在 `pixiv_r18_groups` 内（配置为空则任何群都不能开），私聊只需账号白名单；
+- 指令：`/pixiv r18 status`（查看当前会话档位）、`/pixiv r18 on`（开启 R-18，仍拒绝 R-18G）、`/pixiv r18 all`（R-18G 全放行）、`/pixiv r18 off`（关闭，回落到全局配置）；
+- 群聊发 R18 图有平台风控风险，建议仅私聊/熟人小群使用。
 
 ## 使用示例
 
@@ -77,6 +86,7 @@ python build.py                           # 产出 dist/siwu-pixiv-image-0.1.0.z
 
 ## 版本历史
 
+- v0.2.0：R18 分群管理（白名单账号指令开/关、群白名单、会话级持久化）；插件改名去个性化称呼（P站找图）。
 - v0.1.0：首个版本。四工具 + LLM 路由、OAuth 自动续期、三档 R18、收藏门槛、代理、本地发图。
 
 ## 相关

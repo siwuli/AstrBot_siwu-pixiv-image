@@ -1,5 +1,5 @@
 # -*- coding: UTF-8 -*-
-"""兔兔P站找图插件（pixiv_image，AstrBot）。
+"""P站找图插件（pixiv_image，AstrBot）。
 
 按「多工具 + LLM 路由」设计，拆成四个 Agent 工具，由 LLM 根据用户需求自动选择：
 
@@ -38,15 +38,24 @@ from .pixiv_api import (
     PixivError,
     extract_illust_id,
 )
+from .r18_policy import (
+    R18StateStore,
+    can_enable_r18,
+    parse_id_list,
+)
 
 logger = logging.getLogger("astrbot")
 
 DATA_DIR = os.path.join(get_astrbot_data_path(), "pixiv_image")
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
 TOKEN_PATH = os.path.join(DATA_DIR, "token.json")
+R18_STATE_PATH = os.path.join(DATA_DIR, "r18_state.json")
 
 _client: PixivClient | None = None
 _client_lock = asyncio.Lock()
+
+_r18_store: R18StateStore | None = None
+_r18_store_lock = asyncio.Lock()
 
 INTENT_WORDS = (
     "pixiv", "P站", "p站", "找图", "搜图", "排行榜", "排行",
@@ -89,6 +98,30 @@ class PixivImagePlugin(star.Star):
 
     def _send_original(self) -> bool:
         return bool(self._cfg("pixiv_send_original", False))
+
+    def _r18_owners(self) -> set:
+        return parse_id_list(self._cfg("pixiv_r18_owners", ""))
+
+    def _r18_groups(self) -> set:
+        return parse_id_list(self._cfg("pixiv_r18_groups", ""))
+
+    async def _r18_store_get(self) -> R18StateStore:
+        global _r18_store
+        async with _r18_store_lock:
+            if _r18_store is None:
+                _r18_store = R18StateStore(R18_STATE_PATH)
+            return _r18_store
+
+    async def _session_r18_level(self, event: AstrMessageEvent) -> str:
+        """会话级 R18 档位：会话显式设置优先，否则回落全局配置。"""
+        try:
+            store = await self._r18_store_get()
+            lv = store.get(str(event.unified_msg_origin))
+            if lv in R18_LEVELS:
+                return lv
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[pixiv_image] r18 state read failed: {exc}")
+        return self._r18_level()
 
     async def _client_get(self) -> PixivClient:
         global _client
@@ -178,7 +211,7 @@ class PixivImagePlugin(star.Star):
         try:
             results = await client.search_illust(
                 keyword, scope=scope, sort=sort,
-                min_bookmarks=self._min_bookmarks(), r18_level=self._r18_level(),
+                min_bookmarks=self._min_bookmarks(), r18_level=await self._session_r18_level(event),
                 filter_ai=bool(self._cfg("pixiv_filter_ai", True)), limit=self._max_results(),
             )
         except PixivError as exc:
@@ -186,7 +219,7 @@ class PixivImagePlugin(star.Star):
             yield f"Pixiv 搜索失败：{exc}"
             return
         if not results:
-            yield f"关键词「{keyword}」没有找到满足条件的结果（R18 等级={self._r18_level()}，最低收藏 {self._min_bookmarks()}）。可尝试换关键词或放宽门槛。"
+            yield f"关键词「{keyword}」没有找到满足条件的结果（R18 档位={await self._session_r18_level(event)}，最低收藏 {self._min_bookmarks()}）。可尝试换关键词或放宽门槛。"
             return
         sent = await self._send_illust_images(event, client, results)
         yield self._format_results(results, f"Pixiv 搜索「{keyword}」", sent)
@@ -209,9 +242,9 @@ class PixivImagePlugin(star.Star):
         if mode not in RANK_MODES:
             yield f"不支持的排行模式：{mode}。可选：{', '.join(RANK_MODES)}"
             return
-        level = self._r18_level()
+        level = await self._session_r18_level(event)
         if "r18" in mode and level == "safe":
-            yield "当前配置为 safe（仅一般向），无法查看 R-18 排行。可在插件配置 pixiv_r18_level 中调整为 r18 或 r18g。"
+            yield "当前会话为 safe（仅一般向），无法查看 R-18 排行。可让白名单账号发送 /pixiv r18 on 开启，或在插件配置 pixiv_r18_level 调整全局档位。"
             return
         client = await self._client_get()
         try:
@@ -259,7 +292,7 @@ class PixivImagePlugin(star.Star):
                 user_id = users[0]["id"]
                 artist_name = users[0]["name"]
             results = await client.user_illusts(
-                user_id, r18_level=self._r18_level(), min_bookmarks=self._min_bookmarks(),
+                user_id, r18_level=await self._session_r18_level(event), min_bookmarks=self._min_bookmarks(),
                 filter_ai=bool(self._cfg("pixiv_filter_ai", True)), limit=self._max_results(),
             )
         except PixivError as exc:
@@ -267,7 +300,7 @@ class PixivImagePlugin(star.Star):
             yield f"画师作品获取失败：{exc}"
             return
         if not results:
-            yield f"画师「{artist_name}」（ID {user_id}）暂无满足条件的作品（R18={self._r18_level()}，最低收藏 {self._min_bookmarks()}）。"
+            yield f"画师「{artist_name}」（ID {user_id}）暂无满足条件的作品（R18档位={await self._session_r18_level(event)}，最低收藏 {self._min_bookmarks()}）。"
             return
         sent = await self._send_illust_images(event, client, results)
         yield self._format_results(results, f"画师「{artist_name}」作品", sent)
@@ -300,9 +333,9 @@ class PixivImagePlugin(star.Star):
         if not result:
             yield f"作品 {illust_id} 不存在或已被删除。"
             return
-        allowed = R18_LEVELS.get(self._r18_level(), R18_LEVELS["safe"])
+        allowed = R18_LEVELS.get(await self._session_r18_level(event), R18_LEVELS["safe"])
         if result["x_restrict"] not in allowed:
-            yield f"作品《{result['title']}》为 {result['r18_label']}，当前配置（{self._r18_level()}）不予展示。可在配置中调整 pixiv_r18_level。"
+            yield f"作品《{result['title']}》为 {result['r18_label']}，当前会话（{await self._session_r18_level(event)}）不予展示。"
             return
         sent = await self._send_illust_images(event, client, [result])
         yield self._format_results([result], f"Pixiv 作品 {illust_id}", sent)
@@ -335,11 +368,51 @@ class PixivImagePlugin(star.Star):
         req.user_instruction = text
 
     # ------------------------------------------------------------------
+    # R18 会话开关：/pixiv r18 on|all|off|status（仅白名单账号，群聊需群白名单）
+    # ------------------------------------------------------------------
+    async def _cmd_r18(self, event: AstrMessageEvent, parts: list):
+        sub = parts[1].lower() if len(parts) > 1 else "status"
+        origin = str(event.unified_msg_origin)
+        sender = str(event.get_sender_id() or "")
+        group_id = getattr(getattr(event, "message_obj", None), "group_id", None)
+        store = await self._r18_store_get()
+        if sub == "status":
+            cur = store.get(origin) or self._r18_level()
+            yield (
+                f"当前会话 R-18 档位：{cur}（safe=仅一般向 / r18=允许R-18，拒绝R-18G / r18g=全放行）。\n"
+                "白名单账号可用：/pixiv r18 on 开启、/pixiv r18 all 全放行、/pixiv r18 off 关闭"
+            )
+            return
+        if sub not in ("on", "all", "off"):
+            yield "用法：/pixiv r18 on（R-18档）| all（R-18G档）| off（关闭）| status（查看）"
+            return
+        if sub == "off":
+            ok, reason = can_enable_r18(sender, group_id, self._r18_owners(), self._r18_groups())
+            if not ok:
+                yield f"无权关闭：{reason}"
+                return
+            store.clear(origin)
+            yield f"已关闭本会话 R-18（回落到全局配置 pixiv_r18_level={self._r18_level()}）。"
+            return
+        ok, reason = can_enable_r18(sender, group_id, self._r18_owners(), self._r18_groups())
+        if not ok:
+            yield f"无法开启 R-18：{reason}"
+            return
+        level = "r18g" if sub == "all" else "r18"
+        store.set(origin, level)
+        label = "R-18G 全放行" if level == "r18g" else "R-18（拒绝 R-18G）"
+        yield f"已开启本会话 {label}。关闭请发 /pixiv r18 off"
+
+    # ------------------------------------------------------------------
     # 命令兜底：/pixiv 关键词 或 /pixiv 排行
     # ------------------------------------------------------------------
     @filter.command("pixiv")
     async def pixiv_command(self, event: AstrMessageEvent, *args):
         parts = [str(a).strip() for a in args if str(a).strip()]
+        if parts and parts[0].lower() == "r18":
+            async for chunk in self._cmd_r18(event, parts):
+                yield chunk
+            return
         text = (event.get_message_str() or "").strip()
         for w in ("pixiv", "P站", "p站"):
             if text.startswith(w):
