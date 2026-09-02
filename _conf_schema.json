@@ -7,7 +7,7 @@
   },
   "pixiv_refresh_token": {
     "description": "Pixiv refresh_token（登录凭证）",
-    "hint": "用 Pixiv 账号通过 gppt 等工具换取；插件会自动续期并缓存新 token",
+    "hint": "获取：pip install gppt → gppt configure（填账号密码）→ gppt login --e2e，复制输出的 refresh_token；或 gppt login --oauth 浏览器授权。详见 README",
     "type": "string",
     "default": ""
   },

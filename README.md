@@ -34,14 +34,37 @@
 | `pixiv_filter_ai` | 过滤 AI 作品 | true |
 | `pixiv_send_original` | 发送原图（关闭则发 1200px 大图） | false |
 
-## 获取 refresh_token
+## 获取 refresh_token（Pixiv App-API 登录凭证）
 
-1. 注册/登录 Pixiv 账号；
-2. 使用开源工具（如 [gppt](https://github.com/eggplants/gppt)、浏览器控制台抓取 OAuth 回调）换取 refresh_token；
-3. 填入插件配置 `pixiv_refresh_token`；
-4. 插件首次调用会自动换取 access_token 并缓存（token 轮换后写 `data/pixiv_image/token.json`）。
+插件通过 refresh_token 换取 access_token（有效约 1 小时），并自动用服务端轮换的新 refresh_token 续期。
+**建议注册专用小号**（注册后到 https://www.pixiv.net/settings 打开 R-18/R-18G 显示开关；插件默认 safe 档仍只发一般向，开启不影响）。
 
-> 提示：Pixiv 对中国大陆网络不可直连，请务必配置可达的代理；服务器场景建议在本机部署 Clash/mihomo 后填 `http://127.0.0.1:7890`。
+### 方式一：gppt 命令行自动登录（推荐，需要账号密码）
+
+```bash
+pip install gppt
+gppt configure          # 交互式输入 Pixiv 邮箱/密码（可存 OTP 密钥，双向验证也能过）
+gppt login --e2e        # 自动驱动浏览器登录并打印 refresh_token
+```
+
+说明：首次运行 `--e2e` 会自动下载 Chromium 内核（约 120MB，需能访问网络的机器）；
+若出现图片验证码，gppt 会在浏览器窗口中等待人工填写（桌面环境直接看窗口）。
+
+### 方式二：OAuth 授权码（免密码，适合浏览器已登录 Pixiv）
+
+```bash
+gppt login --oauth
+```
+
+gppt 会打印一个授权链接：用浏览器打开 → 登录（小号）→ 允许授权 → 浏览器地址栏出现 `pixiv://...?code=xxxx` → 把整段 code 粘贴回终端，得到 refresh_token。
+
+### 方式三：从浏览器 Cookie 导入（旧版 gppt 提供 `gppt cookie`，5.x 已移除）
+
+如使用旧版 gppt（如 4.x）：`gppt cookie --browser chrome` 可直接从已登录的浏览器读取；
+注意导出的 token 属于**浏览器当前登录的账号**，需要小号就先小号登录。
+
+> 拿到 refresh_token 后：填入插件配置 `pixiv_refresh_token`，插件数据目录会缓存轮换后的 token（`data/pixiv_image/token.json`）；
+> token 一旦泄露可到 pixiv 设置页注销全部客户端授权使其失效。
 
 ## R18 分群管理
 
