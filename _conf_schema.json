@@ -76,5 +76,11 @@
     "hint": "会员账号搜索时使用后端热门排序（popular_desc），单页直取高收藏作品；非会员关闭此选项，插件拉取两页后按收藏数降序兜底",
     "type": "bool",
     "default": false
+  },
+  "pixiv_search_balanced": {
+    "description": "热门搜索均衡混排",
+    "hint": "开启（默认）：热门头部+中段+最新新作混合采样，按小时轮换，多次搜索不重复、靠后的好图也能出现；关闭：严格按收藏热度返回",
+    "type": "bool",
+    "default": true
   }
 }

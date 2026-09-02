@@ -3,7 +3,7 @@
 
 按「多工具 + LLM 路由」设计，拆成四个 Agent 工具，由 LLM 根据用户需求自动选择：
 
-- siwu_pixiv_search    → 关键词搜图（默认按收藏热度降序 + 最低收藏门槛）
+- siwu_pixiv_search    → 关键词搜图（默认均衡混排 + 最低收藏门槛）
 - siwu_pixiv_ranking   → 每日/每周/每月排行榜（用户没指定具体图时用热门榜）
 - siwu_pixiv_artist    → 找指定画师的作品
 - siwu_pixiv_detail    → 指定 pixiv 作品链接/ID 查详情
@@ -13,7 +13,8 @@
 - refresh_token OAuth 自动续期（缓存轮换后的 token 到 AstrBot 数据目录）；
 - HTTP 代理配置（pixiv_proxy，如 http://127.0.0.1:7890）；
 - R18 三档：safe(默认，仅一般向) / r18(允许R-18) / r18g(全放行)，按 x_restrict 过滤；
-- 热门度：搜索按 popular_desc 排序并过滤最低收藏数（默认 1000，可配置）；
+- 热门度：搜索按收藏热度过滤最低收藏数（默认 1000，可配置）；默认均衡混排
+  （热门头部+中段+最新新作，按小时轮换），关闭 pixiv_search_balanced 则严格取热度最高；
 - 发图：图片经代理下载到本地后用 Image.fromFileSystem 发送（i.pximg.net 需 Referer，
   QQ 客户端直连海外图片站不可靠，本地文件最稳），先发图后组织文字。
 """
@@ -189,7 +190,7 @@ class PixivImagePlugin(star.Star):
         self, event: AstrMessageEvent, keyword: str = "", scope: str = "both",
         sort: str = "popular_desc", note: str = "",
     ):
-        """在 Pixiv 按关键词找插画/美图（默认按收藏热度排序并过滤低人气作品）。适用于用户要求「找/搜/来几张 xx 的图」「xx 的插画」「miku/初音 图包」等，或用户没有具体要求只想看热门图时。关键词请用作品常用标签/标题词（中文或日文皆可）。scope 可选 tag(仅标签)/title(标题)/both(标签+标题，默认)；sort 可选 popular_desc(默认，收藏优先)/date_desc(最新优先)。会直发热门候选图，请基于返回数据组织最终回复并附上作品链接。
+        """在 Pixiv 按关键词找插画/美图（默认均衡混排：热门头部+中段+最新新作混合，过滤低人气作品，避免每次都是同一批顶级图）。适用于用户要求「找/搜/来几张 xx 的图」「xx 的插画」「miku/初音 图包」等，或用户没有具体要求只想看热门图时。关键词请用作品常用标签/标题词（中文或日文皆可）。scope 可选 tag(仅标签)/title(标题)/both(标签+标题，默认)；sort 可选 popular_desc(默认，收藏优先)/date_desc(最新优先)。会直发热门候选图，请基于返回数据组织最终回复并附上作品链接。
         
         Args:
             keyword(string): 搜索关键词，如 miku、明日方舟、风景
@@ -215,6 +216,7 @@ class PixivImagePlugin(star.Star):
                 min_bookmarks=self._min_bookmarks(), r18_level=await self._session_r18_level(event),
                 filter_ai=bool(self._cfg("pixiv_filter_ai", True)), limit=self._max_results(),
                 premium=bool(self._cfg("pixiv_premium", False)),
+                balanced=bool(self._cfg("pixiv_search_balanced", True)),
             )
         except PixivError as exc:
             logger.error(f"[pixiv_image] search failed: {exc}")

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -179,6 +180,68 @@ def filter_illusts(
     if limit is not None:
         out = out[: max(0, int(limit))]
     return out
+
+
+def sample_balanced(
+    hot: list[dict[str, Any]],
+    fresh: list[dict[str, Any]],
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    """热门 + 最新混排采样：第一张留给热门最优，其余从热门中段均匀取样，最后补一张最新新作。
+
+    - hot：已按收藏数降序的热门候选；
+    - fresh：最新排序候选（API 顺序即新→旧，仅取未与热门重复的一张）；
+    - 结果不会永远是同一批顶级图，同时保留「至少有一张真热门」的质量位。
+    """
+    hot = list(hot or [])
+    fresh = list(fresh or [])
+    limit = max(1, int(limit or 1))
+    seen: set[int] = set()
+    out: list[dict[str, Any]] = []
+
+    def take(item: dict[str, Any]) -> bool:
+        iid = int(item.get("id") or 0)
+        if not iid or iid in seen:
+            return False
+        seen.add(iid)
+        out.append(item)
+        return True
+
+    if not hot:
+        # 无热门候选时直接用最新候选填满（保底）
+        for it in fresh:
+            take(it)
+            if len(out) >= limit:
+                break
+        return out
+    take(hot[0])
+    quota = limit - len(out)
+    fresh_quota = 1 if (quota > 0 and fresh) else 0
+    hot_quota = max(0, quota - fresh_quota)
+    if hot_quota > 0 and len(hot) > 1:
+        rest = [it for it in hot[1:] if int(it.get("id") or 0) not in seen]
+        if rest:
+            if len(rest) <= hot_quota:
+                for it in rest:
+                    take(it)
+                    if len(out) >= limit:
+                        break
+            else:
+                step = len(rest) / hot_quota
+                for i in range(hot_quota):
+                    idx = min(len(rest) - 1, int((i + 0.5) * step))
+                    take(rest[idx])
+    if fresh_quota and len(out) < limit:
+        for it in fresh:
+            if take(it):
+                break
+    return out
+
+
+def _hour_rotation(seed: str = "", span: int = 3, page_size: int = 30) -> int:
+    """按小时轮换热门页起点（0/30/60...），同一关键词多次搜索也会换一批候选。"""
+    key = f"{int(time.time()) // 3600}:{seed}"
+    return (int(hashlib.md5(key.encode("utf-8")).hexdigest(), 16) % max(1, span)) * page_size
 
 
 def search_params(word: str, scope: str = "tag", sort: str = "popular_desc",
@@ -370,17 +433,52 @@ class PixivClient:
         limit: int = 5,
         offset: int = 0,
         premium: bool = False,
+        balanced: bool = True,
     ) -> list[dict[str, Any]]:
         await self.ensure_auth()
-        # 会员（premium=True）+ 热门排序：popular_desc 后端直接生效，单页直取
+        limit_n = max(1, int(limit))
+        # 会员（premium=True）+ 热门排序：popular_desc 后端直接生效
         if premium and sort == "popular_desc":
+            if balanced:
+                # 均衡混排：热门两页（起点按小时轮换）+ 最新一页，混合采样，
+                # 避免每次都是同一批顶级图，同时让新发布的好图有机会出现。
+                rot = _hour_rotation(word)
+                all_params = [
+                    search_params(word, scope=scope, sort="popular_desc", filter_ai=filter_ai, offset=rot),
+                    search_params(word, scope=scope, sort="popular_desc", filter_ai=filter_ai, offset=rot + 30),
+                    search_params(word, scope=scope, sort="date_desc", filter_ai=filter_ai, offset=0),
+                ]
+                resp_list = await asyncio.gather(*(
+                    self._request("GET", f"{APP_API_HOST}/v1/search/illust", params=p)
+                    for p in all_params
+                ))
+                raw_hot: list[dict] = []
+                raw_fresh: list[dict] = []
+                for i, resp in enumerate(resp_list):
+                    page = resp.get("illusts") or []
+                    if i < 2:
+                        raw_hot.extend(page)
+                    else:
+                        raw_fresh.extend(page)
+                hot = filter_illusts(raw_hot, r18_level, min_bookmarks, filter_ai, None)
+                hot.sort(key=lambda x: x["bookmarks"], reverse=True)
+                fresh = filter_illusts(raw_fresh, r18_level, min_bookmarks, filter_ai, None)
+                out = sample_balanced(hot, fresh, limit_n)
+                if not out and min_bookmarks > 0:
+                    # 软降级：门槛过严时退而展示相对最热候选
+                    hot = filter_illusts(raw_hot, r18_level, 0, filter_ai, None)
+                    hot.sort(key=lambda x: x["bookmarks"], reverse=True)
+                    fresh = filter_illusts(raw_fresh, r18_level, 0, filter_ai, None)
+                    out = sample_balanced(hot, fresh, limit_n)
+                return out[:limit_n]
+            # 严格热门（balanced=False）：单页直取，保持 API 热门顺序
             params = search_params(word, scope=scope, sort=sort, filter_ai=filter_ai, offset=offset)
             resp = await self._request("GET", f"{APP_API_HOST}/v1/search/illust", params=params)
             items = resp.get("illusts") or []
             out = filter_illusts(items, r18_level, min_bookmarks, filter_ai, None)
             if not out and min_bookmarks > 0:
                 out = filter_illusts(items, r18_level, 0, filter_ai, None)
-            return out[: max(1, int(limit))]
+            return out[:limit_n]
         # 非会员（或 date 排序）：popular_desc 会被静默降级为最新，
         # 拉两页后由客户端按收藏数降序兜底；date_desc 保持 API 顺序（最新）。
         items: list[dict] = []
@@ -394,12 +492,17 @@ class PixivClient:
         out = filter_illusts(items, r18_level, min_bookmarks, filter_ai, None)
         if sort == "popular_desc":
             out.sort(key=lambda x: x["bookmarks"], reverse=True)
+            if balanced:
+                # 从全部合规候选中分段采样，避免永远只取头部几张
+                out = sample_balanced(out, [], limit_n)
         if not out and min_bookmarks > 0:
             # 软降级：门槛过严/排序受限时，退而展示相对最热候选
             out = filter_illusts(items, r18_level, 0, filter_ai, None)
             if sort == "popular_desc":
                 out.sort(key=lambda x: x["bookmarks"], reverse=True)
-        return out[: max(1, int(limit))]
+                if balanced:
+                    out = sample_balanced(out, [], limit_n)
+        return out[:limit_n]
 
     async def illust_ranking(
         self,

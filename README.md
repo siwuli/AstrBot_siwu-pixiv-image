@@ -1,16 +1,18 @@
 # P站找图（siwu-pixiv-image · AstrBot 插件）
 
-让机器人访问 Pixiv 找图：关键词搜图、每日/每周排行榜、画师作品、指定作品详情。
-拆成四个 Agent 工具，由 LLM 根据用户提问自动路由（与 siwu-image-search 同一套多工具架构）。
+让机器人访问 Pixiv 找图：关键词搜图、每日/每周排行榜、画师作品、指定作品详情、相似图推荐。
+拆成五个 Agent 工具，由 LLM 根据用户提问自动路由（与 siwu-image-search 同一套多工具架构）。
 
 ## 功能特性
 
 - **多工具 + LLM 路由**：
-  - `siwu_pixiv_search`：关键词搜图，默认按收藏热度降序
+  - `siwu_pixiv_search`：关键词搜图，默认「均衡混排」采样
   - `siwu_pixiv_ranking`：每日/每周/每月排行榜（用户没指定目标时发热门榜）
   - `siwu_pixiv_artist`：画师名/IP 搜作品
   - `siwu_pixiv_detail`：pixiv 作品链接/ID 查详情
-- **热门度门槛**：搜索按 `total_bookmarks` 降序，低于 `pixiv_min_bookmarks`（默认 1000）直接剔除（会员账号开启 `pixiv_premium` 后由后端热门排序保证；非会员自动拉取两页后客户端按收藏降序，并如实提示未达门槛）
+  - `siwu_pixiv_related`：按作品 ID 找相似/相关插画
+- **热门度门槛**：低于 `pixiv_min_bookmarks`（默认 1000）收藏的作品直接剔除（会员账号开启 `pixiv_premium` 后由后端热门排序保证；非会员自动拉取两页后客户端按收藏降序，并如实提示未达门槛）
+- **均衡混排（默认开启，`pixiv_search_balanced`）**：热门搜索不再永远返回同一批顶级图——热门头部保留一张质量位，中段均匀取样，再补一张最新发布且达门槛的新作，并按小时轮换热门页起点；同一关键词反复搜也能换一批，靠后的好图有机会出现。关闭该配置则严格按收藏热度直取
 - **R18 三档**：`safe`（默认，仅一般向）/ `r18`（允许 R-18，拒绝 R-18G）/ `r18g`（全放行）
 - **refresh_token 鉴权**：Pixiv App-API OAuth 自动续期，轮换后的 token 缓存到 AstrBot 数据目录
 - **代理配置**：`pixiv_proxy` 支持 http/https 代理（Clash 混合端口 7890 亦可）
@@ -34,6 +36,7 @@
 | `pixiv_filter_ai` | 过滤 AI 作品 | true |
 | `pixiv_send_original` | 发送原图（关闭则发 1200px 大图） | false |
 | `pixiv_premium` | Pixiv 高级会员：开启后搜索使用后端热门排序（popular_desc）单页直取；关闭则拉两页按收藏降序兜底（非会员限制） | false |
+| `pixiv_search_balanced` | 热门搜索均衡混排（热门头部+中段+最新新作，按小时轮换）；关闭则严格按收藏热度返回 | true |
 
 ## 获取 refresh_token（Pixiv App-API 登录凭证）
 
@@ -91,25 +94,28 @@ gppt 会打印一个授权链接：用浏览器打开 → 登录（小号）→ 
 
 ```text
 siwu-pixiv-image-1_0/
-├── main.py            # 插件入口：4 个 llm_tool + 意图钩子 + 命令兜底
+├── main.py            # 插件入口：5 个 llm_tool + 意图钩子 + 命令兜底
 ├── pixiv_api.py       # Pixiv App-API 客户端（OAuth/搜索/排行/画师/详情/下载）
 ├── _conf_schema.json  # 配置 schema
 ├── metadata.yaml      # 插件元数据
 ├── requirements.txt   # aiohttp
 ├── build.py           # 打包脚本 → dist/siwu-pixiv-image-<version>.zip
-└── tests/             # 单元测试（30 例，mock 网络层）
+└── tests/             # 单元测试（mock 网络层，无网络依赖）
 ```
 
 ## 开发与测试
 
 ```bash
-python -m unittest discover -s tests -v   # 30 例全绿，无网络依赖
+python -m unittest discover -s tests -v   # 全绿，无网络依赖
 ruff check .                              # lint 干净
 python build.py                           # 产出 dist/siwu-pixiv-image-0.1.0.zip
 ```
 
 ## 版本历史
 
+- v0.2.7：均衡混排搜索（默认开启）：热门头部+中段+最新新作混合采样、按小时轮换页起点，同一关键词多次搜索不重复，靠后的好图也能出现；新增 `pixiv_search_balanced` 配置可关闭。
+- v0.2.5：会员模式 `pixiv_premium`：会员账号使用后端热门排序，非会员拉两页按收藏降序兜底。
+- v0.2.2：搜索接口修正为 /v1/search/illust。
 - v0.2.0：R18 分群管理（白名单账号指令开/关、群白名单、会话级持久化）；插件改名去个性化称呼（P站找图）。
 - v0.1.0：首个版本。四工具 + LLM 路由、OAuth 自动续期、三档 R18、收藏门槛、代理、本地发图。
 

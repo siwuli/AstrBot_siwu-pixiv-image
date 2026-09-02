@@ -20,11 +20,13 @@ from pixiv_api import (
     PixivClient,
     PixivError,
     TokenStore,
+    _hour_rotation,
     extract_illust_id,
     filter_illusts,
     oauth_headers,
     parse_illust,
     ranking_params,
+    sample_balanced,
     search_params,
     user_illusts_params,
 )
@@ -156,6 +158,51 @@ class TestFilterIllusts(unittest.TestCase):
     def test_limit(self):
         out = filter_illusts(self.items, limit=2)
         self.assertEqual(len(out), 2)
+
+
+class TestSampleBalanced(unittest.TestCase):
+    def _hot(self, ids):
+        return [make_illust(i, bookmarks=10000 - i * 100) for i in ids]
+
+    def test_small_pool_takes_all(self):
+        hot = self._hot([1, 2, 3])
+        out = sample_balanced(hot, [], 5)
+        self.assertEqual([r["id"] for r in out], [1, 2, 3])
+
+    def test_first_is_hot_top(self):
+        hot = self._hot([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        out = sample_balanced(hot, [], 3)
+        self.assertEqual(out[0]["id"], 1)
+
+    def test_mid_sampling_and_fresh(self):
+        # 10 个热门取 3：首位 + 中段一张 + 最新一张
+        hot = self._hot([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        fresh = self._hot([101])
+        out = sample_balanced(hot, fresh, 3)
+        # 热门中段：rest=[2..10] 取中间索引 4 → id 6
+        self.assertEqual([r["id"] for r in out], [1, 6, 101])
+
+    def test_fresh_skips_duplicate(self):
+        hot = self._hot([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        fresh = self._hot([1, 101])  # 1 已在热门中出现
+        out = sample_balanced(hot, fresh, 5)
+        ids = [r["id"] for r in out]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertIn(101, ids)
+
+    def test_empty_hot_uses_fresh(self):
+        out = sample_balanced([], self._hot([201, 202]), 3)
+        self.assertEqual([r["id"] for r in out], [201, 202])
+
+    def test_zero_hot_zero_fresh(self):
+        self.assertEqual(sample_balanced([], [], 3), [])
+
+    def test_hour_rotation_stable_and_in_range(self):
+        a = _hour_rotation("miku")
+        b = _hour_rotation("miku")
+        self.assertEqual(a, b)
+        self.assertEqual(a % 30, 0)
+        self.assertIn(a, (0, 30, 60))
 
 
 class TestParams(unittest.TestCase):
@@ -299,12 +346,34 @@ class TestPixivClient(unittest.TestCase):
         out = _run(c.search_illust("x", min_bookmarks=0, limit=5))
         self.assertEqual([r["id"] for r in out], [22, 23, 21])
 
-    def test_premium_single_page(self):
+    def test_premium_balanced_mix(self):
+        # 默认均衡混排：热门两页（页起点轮换） + 最新一页并发请求
+        hot1 = [make_illust(31, bookmarks=5000), make_illust(32, bookmarks=8000)]
+        hot2 = [make_illust(33, bookmarks=7000), make_illust(34, bookmarks=6000)]
+        fresh1 = [make_illust(35, bookmarks=2000)]
+        c, s = self._client([
+            ({"illusts": hot1}, 200),
+            ({"illusts": hot2}, 200),
+            ({"illusts": fresh1}, 200),
+        ])
+        c.tokens.update("at", "rt", 3600)
+        out = _run(c.search_illust("miku", min_bookmarks=1000, limit=3, premium=True))
+        self.assertEqual(len(s.calls), 3)
+        sorts = [call[2]["params"]["sort"] for call in s.calls]
+        self.assertEqual(sorts, ["popular_desc", "popular_desc", "date_desc"])
+        ids = [r["id"] for r in out]
+        # 热门按收藏排序后 [32,33,34,31]：首位=最热，中段取一张，再补一张最新
+        self.assertEqual(ids[0], 32)
+        self.assertIn(35, ids)
+        self.assertEqual(len(set(ids)), 3)
+
+    def test_premium_strict_single_page(self):
+        # 关闭均衡混排：单页直取，保持 API 热门顺序（旧行为）
         items = [make_illust(31, bookmarks=5000), make_illust(32, bookmarks=8000)]
         c, s = self._client([({"illusts": items}, 200), ({"illusts": items}, 200)])
         c.tokens.update("at", "rt", 3600)
-        out = _run(c.search_illust("miku", min_bookmarks=1000, limit=5, premium=True))
-        self.assertEqual(len(s.calls), 1)  # 会员热门模式只请求一页
+        out = _run(c.search_illust("miku", min_bookmarks=1000, limit=5, premium=True, balanced=False))
+        self.assertEqual(len(s.calls), 1)
         self.assertEqual(s.calls[0][2]["params"]["sort"], "popular_desc")
         self.assertEqual([r["id"] for r in out], [31, 32])  # API 顺序保留
 
