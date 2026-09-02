@@ -114,6 +114,7 @@ python build.py                           # 产出 dist/siwu-pixiv-image-0.1.0.z
 
 ## 版本历史
 
+- v0.2.13：修复 /pixiv 带参数命令报「_empty() takes no arguments」：命令参数改用 GreedyStr 注解（AstrBot 参数解析会将无注解 `*args` 当作 inspect.Parameter.empty 调用导致异常）。
 - v0.2.12：命令帮助完善：/pixiv 注册描述（指令列表可见子命令），支持 /pixiv help 输出全部子命令用法（含 R18 会话级开关）。
 - v0.2.11：缓存来源指纹机制：token 缓存记录其来源配置的 refresh_token 前缀，重启后自动比对——同账号正常轮换保留缓存，配置变更（换账号）自动作废旧缓存并以新配置重新登录，不再依赖手动删除缓存。
 - v0.2.10：修复换账号后旧 token 缓存残留导致继续用旧账号（表现为非会员、热门排序失效）的问题：检测配置与缓存不一致并告警，README/配置说明明确「更换账号需删除 token.json 再重启」。

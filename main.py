@@ -32,6 +32,7 @@ from astrbot.api.all import AstrBotConfig, AstrMessageEvent, llm_tool
 from astrbot.api.event import MessageChain, filter
 from astrbot.api.message_components import Image as ComponentImage
 from astrbot.api.provider import ProviderRequest
+from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .pixiv_api import (
@@ -466,8 +467,8 @@ class PixivImagePlugin(star.Star):
         "「/pixiv 作品ID」查详情｜「/pixiv r18 on|all|off|status」"
         "会话级 R18 开关（仅白名单账号，按会话独立）",
     )
-    async def pixiv_command(self, event: AstrMessageEvent, *args):
-        parts = [str(a).strip() for a in args if str(a).strip()]
+    async def pixiv_command(self, event: AstrMessageEvent, args: GreedyStr):
+        parts = [str(a).strip() for a in (args or "").split() if str(a).strip()]
         if parts and parts[0].lower() == "r18":
             async for chunk in self._cmd_r18(event, parts):
                 yield chunk
