@@ -95,6 +95,24 @@ class TestR18StateStore(unittest.TestCase):
             s.set("x", "bogus")
             self.assertIsNone(s.get("x"))
 
+    def test_roundtrip_r18only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "r18.json")
+            s = R18StateStore(p)
+            s.set("g:1", "r18only")
+            self.assertEqual(s.get("g:1"), "r18only")
+            s2 = R18StateStore(p)  # 重新加载后保留
+            self.assertEqual(s2.get("g:1"), "r18only")
+
+    def test_roundtrip_r18gonly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "r18.json")
+            s = R18StateStore(p)
+            s.set("g:2", "r18gonly")
+            self.assertEqual(s.get("g:2"), "r18gonly")
+            s2 = R18StateStore(p)
+            self.assertEqual(s2.get("g:2"), "r18gonly")
+
     def test_all(self):
         with tempfile.TemporaryDirectory() as tmp:
             s = R18StateStore(os.path.join(tmp, "r18.json"))

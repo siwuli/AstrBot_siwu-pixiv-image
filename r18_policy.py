@@ -16,8 +16,10 @@ import os
 
 logger = logging.getLogger("astrbot")
 
-R18_ON_LEVEL = "r18"   # 开启指令落到 r18 档（safe/r18/r18g 三档中的中间档）
+R18_ON_LEVEL = "r18"   # 开启指令落到 r18 档
 R18_OFF_LEVEL = "safe"  # 关闭指令回到 safe
+# 全部合法档位（与 pixiv_api.R18_LEVELS 保持一致，避免循环导入故各自维护）
+R18_LEVEL_NAMES = ("safe", "r18", "r18g", "r18only", "r18gonly")
 
 
 def parse_id_list(raw: str | list | None) -> set[str]:
@@ -78,7 +80,7 @@ class R18StateStore:
             with open(self.path, encoding="utf-8") as f:
                 d = json.load(f)
             if isinstance(d, dict):
-                self._data = {str(k): str(v) for k, v in d.items() if str(v) in ("safe", "r18", "r18g")}
+                self._data = {str(k): str(v) for k, v in d.items() if str(v) in R18_LEVEL_NAMES}
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[pixiv] r18 state load failed: {exc}")
 
@@ -94,7 +96,7 @@ class R18StateStore:
         return self._data.get(str(origin))
 
     def set(self, origin: str, level: str) -> None:
-        if level not in ("safe", "r18", "r18g"):
+        if level not in R18_LEVEL_NAMES:
             return
         self._data[str(origin)] = level
         self.save()

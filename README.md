@@ -115,6 +115,7 @@ python build.py                           # 产出 dist/siwu-pixiv-image-0.1.0.z
 
 ## 版本历史
 
+- v0.2.18：修复 only/gonly 档位被会话状态存储静默丢弃（R18StateStore 只接受三档）——「/pixiv r18 only」此前显示开启但实际未生效，仍会混入一般向作品。
 - v0.2.17：新增「只发 R-18」模式：`/pixiv r18 only`（只 R-18）/ `/pixiv r18 gonly`（只 R-18G），搜索与排行按档位严格过滤。
 - v0.2.16：修复命令无响应：指令处理改用 AstrBot 标准写法（stop_event + make_result），命令结果不再被 LLM 抢答覆盖。
 - v0.2.15：命令重构为 AstrBot 标准指令组（command_group + 子指令）：`/pixiv r18|search|rank|help`，子指令在指令列表/帮助中独立可见，参数按官方方式解析。
