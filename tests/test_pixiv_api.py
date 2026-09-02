@@ -265,14 +265,36 @@ class TestTokenStore(unittest.TestCase):
         self.assertEqual(ts.refresh_token, "rt-fallback")
         self.assertFalse(ts.usable())
 
-    def test_cache_overrides_config_but_warns(self):
-        # 缓存与配置不一致（换账号残留/轮换）时：仍以缓存为准但发 warning
+    def test_changed_account_resets_cache(self):
+        # 配置换了账号（来源指纹不同）：缓存作废，以配置为准重新登录
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "token.json")
             ts = TokenStore(path)
-            ts.update("at-cache", "rt-cache", 3600)
+            ts.update("at-cache", "rt-cache", 3600, source_refresh="oldaccountprefix123")
+            ts2 = TokenStore(path, fallback_refresh="newaccountprefix456")
+            self.assertEqual(ts2.access_token, "")
+            self.assertEqual(ts2.refresh_token, "newaccountprefix456")
+            self.assertFalse(ts2.usable())
+
+    def test_same_account_cache_kept(self):
+        # 同一账号正常轮换（来源指纹一致）：缓存续用，不重新登录
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "token.json")
+            ts = TokenStore(path)
+            ts.update("at-cache", "rt-rotated", 3600, source_refresh="sameaccountprefix123")
+            ts2 = TokenStore(path, fallback_refresh="sameaccountprefix123456789")
+            self.assertEqual(ts2.access_token, "at-cache")
+            self.assertEqual(ts2.refresh_token, "rt-rotated")
+
+    def test_legacy_cache_without_source_resets(self):
+        # 旧格式缓存（无来源标记）：无法确认账号，按配置重新登录
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "token.json")
+            ts = TokenStore(path)
+            ts.update("at-cache", "rt-cache", 3600)  # 不传 source_refresh → 旧格式
             ts2 = TokenStore(path, fallback_refresh="rt-config")
-            self.assertEqual(ts2.refresh_token, "rt-cache")
+            self.assertEqual(ts2.access_token, "")
+            self.assertEqual(ts2.refresh_token, "rt-config")
 
 
 class FakeResponse:

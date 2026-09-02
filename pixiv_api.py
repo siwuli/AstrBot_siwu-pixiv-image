@@ -284,6 +284,9 @@ class TokenStore:
         self.access_token = ""
         self.refresh_token = fallback_refresh or ""
         self.expires_at = 0.0
+        # 缓存来源指纹：生成缓存时使用的配置 refresh_token 前缀，
+        # 用于重启后判断「同账号轮换（保留缓存）」还是「换了账号（作废缓存）」。
+        self.source_refresh = ""
         self.load()
 
     def load(self) -> None:
@@ -293,16 +296,22 @@ class TokenStore:
             with open(self.path, encoding="utf-8") as f:
                 d = json.load(f)
             cached_refresh = str(d.get("refresh_token") or "")
-            if self.refresh_token and cached_refresh and cached_refresh != self.refresh_token:
-                # 配置与缓存不一致：同一账号正常轮换会更新缓存（正常现象）；
-                # 但若刚更换 Pixiv 账号，旧缓存会覆盖新配置导致账号切换不生效，
-                # 需删除 data/pixiv_image/token.json 后重启。
-                logger.warning(
-                    "[pixiv] 配置 refresh_token 与缓存不一致（账号轮换属正常；"
-                    "若刚更换 Pixiv 账号，请删除 data/pixiv_image/token.json 后重启）"
+            source = str(d.get("source_refresh") or "")
+            cfg = (self.refresh_token or "").strip()
+            if cfg and (not source or source[:16] != cfg[:16]):
+                # 配置的 refresh_token 已变化（换了账号/更新配置），或者缓存是
+                # 无来源标记的旧格式：缓存作废，以配置为准重新登录。
+                # 同一账号的正常轮换不会走到这里（前缀指纹一致，缓存续用）。
+                self.access_token = ""
+                self.refresh_token = cfg
+                self.expires_at = 0.0
+                logger.info(
+                    "[pixiv] 配置 refresh_token 与缓存账号不一致，已重置缓存"
+                    "（将用新配置重新登录；同一账号正常轮换不受影响）"
                 )
+                return
             self.access_token = str(d.get("access_token") or "")
-            self.refresh_token = cached_refresh or self.refresh_token
+            self.refresh_token = cached_refresh or cfg
             self.expires_at = float(d.get("expires_at") or 0)
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"[pixiv] token load failed: {exc}")
@@ -316,6 +325,7 @@ class TokenStore:
                 json.dump({
                     "access_token": self.access_token,
                     "refresh_token": self.refresh_token,
+                    "source_refresh": self.source_refresh,
                     "expires_at": self.expires_at,
                 }, f, ensure_ascii=False)
         except Exception as exc:  # noqa: BLE001
@@ -325,10 +335,17 @@ class TokenStore:
         now = now or time.time()
         return bool(self.access_token) and self.expires_at > now
 
-    def update(self, access_token: str, refresh_token: str, expires_in: int) -> None:
+    def update(
+        self,
+        access_token: str,
+        refresh_token: str,
+        expires_in: int,
+        source_refresh: str = "",
+    ) -> None:
         self.access_token = access_token
         if refresh_token:
             self.refresh_token = refresh_token
+        self.source_refresh = (source_refresh or self.refresh_token)[:16]
         self.expires_at = time.time() + max(60, int(expires_in or 3600)) - 60
         self.save()
 
@@ -405,12 +422,13 @@ class PixivClient:
         """用 refresh_token 换取 access_token（自动轮换并持久化）。"""
         if not self.tokens.refresh_token:
             raise PixivError("未配置 Pixiv refresh_token：请在插件配置 pixiv_refresh_token 中填写")
+        used_refresh = self.tokens.refresh_token
         data = {
             "get_secure_url": 1,
             "client_id": CLIENT_ID,
             "client_secret": CLIENT_SECRET,
             "grant_type": "refresh_token",
-            "refresh_token": self.tokens.refresh_token,
+            "refresh_token": used_refresh,
         }
         resp = await self._request(
             "POST", f"{OAUTH_HOST}/auth/token", data=data,
@@ -423,6 +441,7 @@ class PixivClient:
             str(token["access_token"]),
             str(token.get("refresh_token") or ""),
             int(token.get("expires_in") or 3600),
+            source_refresh=used_refresh[:16],
         )
 
     async def ensure_auth(self) -> None:
