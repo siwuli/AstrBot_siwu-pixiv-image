@@ -60,10 +60,16 @@
     "default": false
   },
   "pixiv_send_fallback": {
-    "description": "原图失败自动降级重发",
-    "hint": "开启（默认）：发送原图失败（如平台拒绝大图）时自动改用 1200px 大图重发一次；关闭则失败即跳过",
+    "description": "发图失败自动重试",
+    "hint": "开启（默认）：下载/发送失败时按原尺寸档位自动重试一次；关闭则失败即跳过",
     "type": "bool",
     "default": true
+  },
+  "pixiv_send_rewrite_meta": {
+    "description": "发送前改写图片元数据",
+    "hint": "开启后发送前删除图片 EXIF/注释等元数据（纯字节级改写，像素与尺寸完全不变；仅文件元数据层面变化，QQ 内容审核为像素级识别，此选项不保证规避内容风控）",
+    "type": "bool",
+    "default": false
   },
   "pixiv_r18_owners": {
     "description": "R18 白名单账号（QQ号，逗号分隔）",

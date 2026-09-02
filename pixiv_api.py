@@ -664,3 +664,78 @@ def _extract_api_error(body: str, status: int) -> str:
         return str(msg)[:200]
     except Exception:  # noqa: BLE001
         return body[:120]
+
+
+# ---------------------------------------------------------------------------
+# 图片元数据规范化：仅改写容器元数据（EXIF/注释/文本块），像素数据零改动
+# ---------------------------------------------------------------------------
+# JPEG: 移除 APP1(EXIF)/APP2(ICC/XMP)/COM 等段，SOF/SOS/熵编码数据原样保留；
+# PNG : 移除 tEXt/iTXt/zTXt/tIME/eXIf 等辅助块，IDAT 像素块原样保留；
+# 其他格式（GIF/WebP 等）原样返回。输出与输入同路径（原地覆盖）。
+_JPEG_SKIP_MARKERS = {0xE1, 0xE2, 0xED, 0xFE}  # APP1/APP2/XMP/COM
+
+
+def strip_image_metadata(path: str) -> str:
+    """原地规范化图片元数据（像素与尺寸不变），返回处理后的路径。"""
+    with open(path, "rb") as f:
+        data = f.read()
+    if data[:3] == b"\xff\xd8\xff":
+        rewritten = _strip_jpeg(data)
+    elif data[:8] == b"\x89PNG\r\n\x1a\n":
+        rewritten = _strip_png(data)
+    else:
+        return path
+    if rewritten and rewritten != data:
+        with open(path, "wb") as f:
+            f.write(rewritten)
+    return path
+
+
+def _strip_jpeg(data: bytes) -> bytes:
+    out = bytearray(b"\xff\xd8")
+    i = 2
+    n = len(data)
+    while i < n:
+        if data[i] != 0xFF:
+            # 熵编码数据段（SOS 之后）：原样拷贝到结尾
+            out += data[i:]
+            break
+        marker = data[i + 1]
+        if marker == 0xD9:  # EOI
+            out += b"\xff\xd9"
+            break
+        if marker == 0xDA:  # SOS：段头 + 剩余熵数据
+            seg_len = int.from_bytes(data[i + 2:i + 4], "big")
+            out += data[i:i + 2 + seg_len]
+            out += data[i + 2 + seg_len:]
+            break
+        seg_len = int.from_bytes(data[i + 2:i + 4], "big")
+        if marker in _JPEG_SKIP_MARKERS:
+            i += 2 + seg_len  # 丢弃元数据段
+            continue
+        out += data[i:i + 2 + seg_len]
+        i += 2 + seg_len
+    return bytes(out)
+
+
+_PNG_TEXT_TYPES = {b"tEXt", b"iTXt", b"zTXt", b"tIME", b"eXIf"}
+
+
+def _strip_png(data: bytes) -> bytes:
+    if len(data) < 33:
+        return data
+    out = bytearray(data[:8])  # 签名原样
+    i = 8
+    n = len(data)
+    while i + 12 <= n:
+        chunk_len = int.from_bytes(data[i:i + 4], "big")
+        chunk_type = data[i + 4:i + 8]
+        total = 12 + chunk_len
+        if i + total > n:
+            break
+        if chunk_type in _PNG_TEXT_TYPES:
+            i += total
+            continue
+        out += data[i:i + total]
+        i += total
+    return bytes(out)

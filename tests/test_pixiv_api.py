@@ -171,6 +171,82 @@ class TestFilterIllusts(unittest.TestCase):
         self.assertEqual(len(out), 2)
 
 
+class TestStripImageMetadata(unittest.TestCase):
+    """元数据规范化：像素与尺寸必须零变化，元数据段被移除。"""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from PIL import Image
+            cls.IMAGE = Image
+        except ImportError:
+            cls.IMAGE = None
+
+    def _require_pil(self):
+        if self.IMAGE is None:
+            self.skipTest("Pillow not installed")
+
+    def _assert_pixels_identical(self, a, b):
+        from PIL import ImageChops
+        self.assertEqual(a.size, b.size)
+        a.load(); b.load()
+        diff = ImageChops.difference(a.convert("RGB"), b.convert("RGB"))
+        self.assertEqual(diff.getbbox(), None, "像素数据发生改变")
+
+    def test_jpeg_exif_stripped_pixels_kept(self):
+        self._require_pil()
+        import io
+        import tempfile
+
+        from pixiv_api import strip_image_metadata
+        # 构造带 EXIF 的 JPEG
+        buf = io.BytesIO()
+        exif = self.IMAGE.Exif()
+        exif[0x010F] = "TestCamera"
+        img = self.IMAGE.new("RGB", (64, 48), (200, 30, 30))
+        img.save(buf, format="JPEG", exif=exif)
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tf:
+            tf.write(buf.getvalue())
+            path = tf.name
+        try:
+            before = self.IMAGE.open(path).convert("RGB")
+            self.assertNotEqual(dict(self.IMAGE.open(path).getexif()), {})
+            strip_image_metadata(path)
+            after = self.IMAGE.open(path).convert("RGB")
+            self._assert_pixels_identical(before, after)
+            self.assertEqual(dict(self.IMAGE.open(path).getexif()), {})
+            self.assertEqual(self.IMAGE.open(path).size, (64, 48))
+        finally:
+            os.unlink(path)
+
+    def test_png_text_stripped_pixels_kept(self):
+        self._require_pil()
+        import io
+        import tempfile
+
+        from PIL import PngImagePlugin
+
+        from pixiv_api import strip_image_metadata
+        buf = io.BytesIO()
+        pnginfo = PngImagePlugin.PngInfo()
+        pnginfo.add_text("Comment", "pixiv secret")
+        img = self.IMAGE.new("RGBA", (32, 40), (10, 200, 100, 255))
+        img.save(buf, format="PNG", pnginfo=pnginfo)
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+            tf.write(buf.getvalue())
+            path = tf.name
+        try:
+            before = self.IMAGE.open(path).convert("RGBA")
+            self.assertNotEqual(self.IMAGE.open(path).text, {})
+            strip_image_metadata(path)
+            after = self.IMAGE.open(path).convert("RGBA")
+            self._assert_pixels_identical(before, after)
+            self.assertEqual(self.IMAGE.open(path).text, {})
+            self.assertEqual(self.IMAGE.open(path).size, (32, 40))
+        finally:
+            os.unlink(path)
+
+
 class TestSampleBalanced(unittest.TestCase):
     def _hot(self, ids):
         return [make_illust(i, bookmarks=10000 - i * 100) for i in ids]

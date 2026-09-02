@@ -41,6 +41,7 @@ from .pixiv_api import (
     PixivClient,
     PixivError,
     extract_illust_id,
+    strip_image_metadata,
 )
 from .r18_policy import (
     R18StateStore,
@@ -150,43 +151,48 @@ class PixivImagePlugin(star.Star):
         """下载 candidates 的图片并发给会话，返回成功发送张数。
 
         发送策略：
-        - pixiv_send_original=true 时优先原图（original_url）；
-        - 原图下载失败自动改用 1200px 大图（image_url）；
-        - 原图发送失败且 pixiv_send_fallback=true 时，用 1200px 大图重发一次
-          （只切换 Pixiv 官方缩略图档位，不做任何像素级处理）。
+        - 按 pixiv_send_original 选择原图（original_url）或 1200px 大图（image_url），
+          所选档位在失败重试时不降级（保持原尺寸）；
+        - pixiv_send_fallback=true 时下载/发送失败自动重试一次（同一 URL 与原尺寸）；
+        - pixiv_send_rewrite_meta=true 时发送前改写文件元数据（删 EXIF/注释，
+          纯字节级操作，像素与尺寸完全不变）。
         """
         max_send = self._max_send()
         prefer_original = self._send_original()
-        fallback = bool(self._cfg("pixiv_send_fallback", True))
-
-        def pick_url(item: dict, want_original: bool) -> str:
-            if want_original:
-                return str(item.get("original_url") or item.get("image_url") or "")
-            return str(item.get("image_url") or item.get("original_url") or "")
+        retry = bool(self._cfg("pixiv_send_fallback", True))
+        rewrite_meta = bool(self._cfg("pixiv_send_rewrite_meta", False))
 
         comps = []
         sent = 0
         for r in results:
             if sent >= max_send:
                 break
-            url = pick_url(r, prefer_original)
+            url = (
+                str(r.get("original_url") or r.get("image_url") or "")
+                if prefer_original
+                else str(r.get("image_url") or r.get("original_url") or "")
+            )
             if not url:
                 continue
             dest = os.path.join(CACHE_DIR, f"{r.get('id')}_{sent}.{_sanitize_ext(url).lstrip('.')}")
             try:
                 await client.download_image(url, dest)
             except Exception as exc:  # noqa: BLE001
-                # 原图下载失败 → 自动降级 1200px 大图
-                alt = pick_url(r, False) if prefer_original else ""
-                if not alt:
+                if retry:
+                    try:
+                        await client.download_image(url, dest)
+                    except Exception as exc2:  # noqa: BLE001
+                        logger.warning(f"[pixiv_image] download failed {r.get('id')}: {exc} / {exc2}")
+                        continue
+                else:
                     logger.warning(f"[pixiv_image] download failed {r.get('id')}: {exc}")
                     continue
-                dest = os.path.join(CACHE_DIR, f"{r.get('id')}_{sent}.{_sanitize_ext(alt).lstrip('.')}")
+            # 配置开启时规范化元数据（去 EXIF/注释，像素与尺寸零改动）
+            if rewrite_meta:
                 try:
-                    await client.download_image(alt, dest)
-                except Exception as exc2:  # noqa: BLE001
-                    logger.warning(f"[pixiv_image] download failed {r.get('id')}: {exc} / {exc2}")
-                    continue
+                    strip_image_metadata(dest)
+                except Exception as exc3:  # noqa: BLE001
+                    logger.warning(f"[pixiv_image] strip metadata failed {r.get('id')}: {exc3}")
             comps.append(ComponentImage.fromFileSystem(dest))
             sent += 1
         if comps:
@@ -194,27 +200,12 @@ class PixivImagePlugin(star.Star):
                 await event.send(MessageChain(comps))
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[pixiv_image] send images failed: {exc}")
-                # 原图发送失败且开启兜底：改用 1200px 大图重发一次
-                if fallback and prefer_original:
-                    fb_comps = []
-                    for r in results[:sent]:
-                        fb_url = str(r.get("image_url") or "")
-                        if not fb_url:
-                            continue
-                        try:
-                            fb_dest = os.path.join(
-                                CACHE_DIR, f"{r.get('id')}_fb.{_sanitize_ext(fb_url).lstrip('.')}",
-                            )
-                            await client.download_image(fb_url, fb_dest)
-                            fb_comps.append(ComponentImage.fromFileSystem(fb_dest))
-                        except Exception as exc2:  # noqa: BLE001
-                            logger.warning(f"[pixiv_image] fallback download failed {r.get('id')}: {exc2}")
-                    if fb_comps:
-                        try:
-                            await event.send(MessageChain(fb_comps))
-                            return len(fb_comps)
-                        except Exception as exc3:  # noqa: BLE001
-                            logger.warning(f"[pixiv_image] fallback send failed: {exc3}")
+                if retry:
+                    try:
+                        await event.send(MessageChain(comps))
+                        return sent
+                    except Exception as exc2:  # noqa: BLE001
+                        logger.warning(f"[pixiv_image] send retry failed: {exc2}")
                 return 0
         return sent
 
