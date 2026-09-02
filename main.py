@@ -416,10 +416,16 @@ class PixivImagePlugin(star.Star):
             "禁止调用 send_message_to_user。"
         )
         if req.func_tool is not None:
-            try:
-                req.func_tool.remove("send_message_to_user")
-            except ValueError:
-                pass
+            # ToolSet API（AstrBot 4.x）：移除内置直发工具，避免与插件工具重复；
+            # 兼容旧版 list.remove 写法
+            remove_tool = getattr(req.func_tool, "remove_tool", None)
+            if callable(remove_tool):
+                remove_tool("send_message_to_user")
+            else:
+                try:
+                    req.func_tool.remove("send_message_to_user")
+                except (AttributeError, ValueError):
+                    pass
         req.user_instruction = text
 
     # ------------------------------------------------------------------
