@@ -329,6 +329,21 @@ class TestPixivClient(unittest.TestCase):
             _run(c.illust_ranking("daily"))
         self.assertIn("403", str(ctx.exception))
 
+    def test_related(self):
+        items = [make_illust(71, bookmarks=5000), make_illust(72, bookmarks=100, x_restrict=1)]
+        c, s = self._client([({"illusts": items}, 200)])
+        c.tokens.update("at", "rt", 3600)
+        out = _run(c.related_illusts(123456, r18_level="safe", min_bookmarks=1000, limit=5))
+        self.assertEqual([r["id"] for r in out], [71])  # R18/门槛过滤
+        self.assertEqual(s.calls[0][2]["params"]["illust_id"], "123456")
+
+    def test_related_relax(self):
+        items = [make_illust(81, bookmarks=50)]
+        c, _s = self._client([({"illusts": items}, 200)])
+        c.tokens.update("at", "rt", 3600)
+        out = _run(c.related_illusts(1, r18_level="safe", min_bookmarks=1000, limit=5))
+        self.assertEqual([r["id"] for r in out], [81])  # 软降级
+
     def test_detail(self):
         resp = {"illust": {"illust": make_illust(777)}}
         c, s = self._client([(resp, 200)])

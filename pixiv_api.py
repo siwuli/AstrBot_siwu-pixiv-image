@@ -447,6 +447,24 @@ class PixivClient:
         items = resp.get("illusts") or []
         return filter_illusts(items, r18_level, min_bookmarks, filter_ai, limit)
 
+    async def related_illusts(
+        self,
+        illust_id: int | str,
+        r18_level: str = "safe",
+        min_bookmarks: int = 0,
+        filter_ai: bool = True,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """按作品 ID 获取相关/相似插画（保持 API 相关度顺序，门槛软降级）。"""
+        await self.ensure_auth()
+        params = {"illust_id": str(illust_id), "filter": "for_android"}
+        resp = await self._request("GET", f"{APP_API_HOST}/v2/illust/related", params=params)
+        items = resp.get("illusts") or []
+        out = filter_illusts(items, r18_level, min_bookmarks, filter_ai, None)
+        if not out and min_bookmarks > 0:
+            out = filter_illusts(items, r18_level, 0, filter_ai, None)
+        return out[: max(1, int(limit))]
+
     async def illust_detail(self, illust_id: int | str) -> dict[str, Any] | None:
         await self.ensure_auth()
         params = {"illust_id": str(illust_id)}

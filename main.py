@@ -7,6 +7,7 @@
 - siwu_pixiv_ranking   → 每日/每周/每月排行榜（用户没指定具体图时用热门榜）
 - siwu_pixiv_artist    → 找指定画师的作品
 - siwu_pixiv_detail    → 指定 pixiv 作品链接/ID 查详情
+- siwu_pixiv_related   → 按作品 ID 找相似/相关插画
 
 核心能力：
 - refresh_token OAuth 自动续期（缓存轮换后的 token 到 AstrBot 数据目录）；
@@ -347,6 +348,49 @@ class PixivImagePlugin(star.Star):
         yield self._format_results([result], f"Pixiv 作品 {illust_id}", sent)
 
     # ------------------------------------------------------------------
+    # 工具 5：按作品 ID 找相似/相关插画
+    # ------------------------------------------------------------------
+    @llm_tool(name="siwu_pixiv_related")
+    async def pixiv_related(self, event: AstrMessageEvent, illust_id: str = "", note: str = ""):
+        """按 pixiv 作品 ID/链接找相似、相关风格的插画（Pixiv related 推荐）。适用于用户给出一个作品链接或 ID 后问「还有类似的图吗」「找同风格/同画师的其他图」「这些图相关推荐」等。会直发相关候选图并返回数据。
+        
+        Args:
+            illust_id(string): pixiv 作品链接或纯数字 ID，如 https://www.pixiv.net/artworks/123456 或 123456
+            note(string): 用户补充说明，可为空
+        """
+        if not self._enabled():
+            yield "P站找图功能已在配置中关闭。"
+            return
+        illust_id = extract_illust_id((illust_id or "").strip())
+        if not illust_id:
+            yield "请提供 pixiv 作品链接或数字 ID，用于查找相似图。"
+            return
+        client = await self._client_get()
+        try:
+            origin = await client.illust_detail(illust_id)
+            if not origin:
+                yield f"作品 {illust_id} 不存在或已被删除。"
+                return
+            allowed = R18_LEVELS.get(await self._session_r18_level(event), R18_LEVELS["safe"])
+            if origin["x_restrict"] not in allowed:
+                yield f"参考作品《{origin['title']}》为 {origin['r18_label']}，当前会话（{await self._session_r18_level(event)}）不予展示。"
+                return
+            results = await client.related_illusts(
+                illust_id, r18_level=await self._session_r18_level(event),
+                min_bookmarks=self._min_bookmarks(),
+                filter_ai=bool(self._cfg("pixiv_filter_ai", True)), limit=self._max_results(),
+            )
+        except PixivError as exc:
+            logger.error(f"[pixiv_image] related failed: {exc}")
+            yield f"相似图获取失败：{exc}"
+            return
+        if not results:
+            yield f"作品 {illust_id}（《{origin['title']}》）暂无相关推荐（受 R18 档位/收藏门槛限制）。"
+            return
+        sent = await self._send_illust_images(event, client, results)
+        yield self._format_results(results, f"与《{origin['title']}》相关的插画", sent)
+
+    # ------------------------------------------------------------------
     # 意图钩子：检测 P 站意图时注入路由指令并移除内置直发工具
     # ------------------------------------------------------------------
     @filter.on_llm_request()
@@ -362,7 +406,8 @@ class PixivImagePlugin(star.Star):
             "1. siwu_pixiv_search——用户给出具体关键词/题材（图、插画、特点标签）想找图；\n"
             "2. siwu_pixiv_ranking——用户没有具体目标，想看「今日/每周推荐、热门排行、排行榜」；\n"
             "3. siwu_pixiv_artist——用户想找某位画师的作品；\n"
-            "4. siwu_pixiv_detail——用户提供了 pixiv 作品链接或 ID。\n"
+            "4. siwu_pixiv_detail——用户提供了 pixiv 作品链接或 ID，想查看该作品本身；\n"
+            "5. siwu_pixiv_related——用户有作品链接/ID 并想找「相似/相关/类似/同风格」的图。\n"
             "工具会自行处理代理/鉴权/过滤并直发图片；工具只返回数据，最终回复由你组织输出，"
             "禁止调用 send_message_to_user。"
         )
@@ -426,6 +471,11 @@ class PixivImagePlugin(star.Star):
                 break
         if not text and parts:
             text = " ".join(parts)
+        pure_id = re.fullmatch(r"\d{6,9}", text) if text else None
+        if pure_id:
+            async for chunk in self.pixiv_detail(event, pixiv_id=text, note=""):
+                yield chunk
+            return
         if not text or any(k in text for k in ("排行", "推荐", "热门")):
             async for chunk in self.pixiv_ranking(event, mode="", note=""):
                 yield chunk
