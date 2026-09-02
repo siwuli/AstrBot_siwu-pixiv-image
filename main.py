@@ -12,7 +12,8 @@
 核心能力：
 - refresh_token OAuth 自动续期（缓存轮换后的 token 到 AstrBot 数据目录）；
 - HTTP 代理配置（pixiv_proxy，如 http://127.0.0.1:7890）；
-- R18 三档：safe(默认，仅一般向) / r18(允许R-18) / r18g(全放行)，按 x_restrict 过滤；
+- R18 五档：safe(默认，仅一般向) / r18(一般向+R-18) / r18only(只R-18) /
+  r18gonly(只R-18G) / r18g(全放行)，按 x_restrict 过滤；
 - 热门度：搜索按收藏热度过滤最低收藏数（默认 1000，可配置）；默认均衡混排
   （结果全部来自热门池：首位保底+中段步进，按小时轮换；热门不足才用最新兜底），
   关闭 pixiv_search_balanced 则严格取热度最高；
@@ -439,12 +440,14 @@ class PixivImagePlugin(star.Star):
         if sub == "status":
             cur = store.get(origin) or self._r18_level()
             yield (
-                f"当前会话 R-18 档位：{cur}（safe=仅一般向 / r18=允许R-18，拒绝R-18G / r18g=全放行）。\n"
-                "白名单账号可用：/pixiv r18 on 开启、/pixiv r18 all 全放行、/pixiv r18 off 关闭"
+                f"当前会话 R-18 档位：{cur}（safe=仅一般向 / r18=一般向+R-18 / "
+                "r18only=只R-18 / r18gonly=只R-18G / r18g=全放行）。\n"
+                "白名单账号可用：/pixiv r18 on 开启、/pixiv r18 only 只发R-18、"
+                "/pixiv r18 all 全放行、/pixiv r18 off 关闭"
             )
             return
-        if sub not in ("on", "all", "off"):
-            yield "用法：/pixiv r18 on（R-18档）| all（R-18G档）| off（关闭）| status（查看）"
+        if sub not in ("on", "all", "off", "only", "gonly"):
+            yield "用法：/pixiv r18 on（一般向+R-18）| only（只R-18）| gonly（只R-18G）| all（全放行）| off（关闭）| status（查看）"
             return
         if sub == "off":
             ok, reason = can_enable_r18(sender, group_id, self._r18_owners(), self._r18_groups())
@@ -458,9 +461,19 @@ class PixivImagePlugin(star.Star):
         if not ok:
             yield f"无法开启 R-18：{reason}"
             return
-        level = "r18g" if sub == "all" else "r18"
+        level = {
+            "on": "r18",
+            "all": "r18g",
+            "only": "r18only",
+            "gonly": "r18gonly",
+        }[sub]
+        label = {
+            "r18": "R-18（含一般向，拒绝 R-18G）",
+            "r18g": "R-18G 全放行",
+            "r18only": "仅 R-18（不含一般向与 R-18G）",
+            "r18gonly": "仅 R-18G",
+        }[level]
         store.set(origin, level)
-        label = "R-18G 全放行" if level == "r18g" else "R-18（拒绝 R-18G）"
         yield f"已开启本会话 {label}。关闭请发 /pixiv r18 off"
 
     # ------------------------------------------------------------------
@@ -519,7 +532,9 @@ class PixivImagePlugin(star.Star):
             "/pixiv search 关键词 —— 搜图（如 /pixiv search miku）\n"
             "/pixiv rank —— 今日排行榜\n"
             "/pixiv r18 status —— 查看本会话 R-18 档位\n"
-            "/pixiv r18 on —— 开启 R-18（拒绝 R-18G，仅白名单账号）\n"
+            "/pixiv r18 on —— 开启 R-18（含一般向，拒绝 R-18G，仅白名单账号）\n"
+            "/pixiv r18 only —— 只发 R-18 作品（仅白名单账号）\n"
+            "/pixiv r18 gonly —— 只发 R-18G 作品（仅白名单账号）\n"
             "/pixiv r18 all —— R-18G 全放行（仅白名单账号）\n"
             "/pixiv r18 off —— 关闭，回落到全局配置（仅白名单账号）\n"
             "R18 按会话独立：某群/私聊开关互不影响，重启后保留。"

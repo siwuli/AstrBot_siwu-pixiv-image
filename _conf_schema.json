@@ -19,7 +19,7 @@
   },
   "pixiv_r18_level": {
     "description": "R18 限制等级",
-    "hint": "safe=仅一般向（默认）；r18=允许R-18但拒绝R-18G；r18g=全放行",
+    "hint": "safe=仅一般向（默认）；r18=一般向+R-18；r18only=只R-18；r18gonly=只R-18G；r18g=全放行",
     "type": "string",
     "default": "safe"
   },

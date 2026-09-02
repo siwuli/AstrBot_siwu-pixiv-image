@@ -13,7 +13,7 @@
   - `siwu_pixiv_related`：按作品 ID 找相似/相关插画
 - **热门度门槛**：低于 `pixiv_min_bookmarks`（默认 1000）收藏的作品直接剔除（会员账号开启 `pixiv_premium` 后由后端热门排序保证；非会员自动拉取两页后客户端按收藏降序，并如实提示未达门槛）
 - **均衡混排（默认开启，`pixiv_search_balanced`）**：热门搜索不再永远返回同一批顶级图，且**保证全部结果都是热门池里的高人气图**——首位保底、中段均匀步进采样，按小时轮换 30/60/90 深层页；仅当热门候选不足要补齐数量时，才用最新发布的新作兜底（不会在热门充足时混入低收藏新图）。关闭该配置则严格按收藏热度直取
-- **R18 三档**：`safe`（默认，仅一般向）/ `r18`（允许 R-18，拒绝 R-18G）/ `r18g`（全放行）
+- **R18 五档**：`safe`（默认，仅一般向）/ `r18`（一般向 + R-18）/ `r18only`（只 R-18）/ `r18gonly`（只 R-18G）/ `r18g`（全放行）
 - **refresh_token 鉴权**：Pixiv App-API OAuth 自动续期，轮换后的 token 缓存到 AstrBot 数据目录
 - **代理配置**：`pixiv_proxy` 支持 http/https 代理（Clash 混合端口 7890 亦可）
 - **图片直发**：图片经代理下载到本地后用 `Image.fromFileSystem` 发送（i.pximg.net 需 Referer，QQ 客户端直连不可靠）
@@ -26,7 +26,7 @@
 | `pixiv_enabled` | 启用插件 | true |
 | `pixiv_refresh_token` | Pixiv OAuth refresh_token（必填） | 空 |
 | `pixiv_proxy` | HTTP 代理地址，如 `http://127.0.0.1:7890` | 空（直连） |
-| `pixiv_r18_level` | 全局 R18 档位：safe / r18 / r18g | safe |
+| `pixiv_r18_level` | 全局 R18 档位：safe / r18 / r18only / r18gonly / r18g | safe |
 | `pixiv_r18_owners` | R18 白名单账号 QQ 号（逗号分隔），只有他们能用 `/pixiv r18 on` 开启 | 空 |
 | `pixiv_r18_groups` | 允许开启 R18 的群号白名单（逗号分隔），空=任何群都不能开；私聊不受限 | 空 |
 | `pixiv_min_bookmarks` | 最低收藏数（搜索/画师工具） | 1000 |
@@ -74,8 +74,9 @@ gppt 会打印一个授权链接：用浏览器打开 → 登录（小号）→ 
 ## R18 分群管理
 
 - 插件默认 `safe`（仅一般向）；**分群独立控制**：某群/会话的档位由白名单账号用指令切换，状态持久化（重启不丢）；
+- **只发 R-18 模式**：`/pixiv r18 only` 后搜索/排行只返回纯 R-18 作品（不含一般向）；`/pixiv r18 gonly` 只返回 R-18G；
 - 权限只认配置的 `pixiv_r18_owners` 白名单，**群主/管理员身份不生效**；群聊还需群号在 `pixiv_r18_groups` 内（配置为空则任何群都不能开），私聊只需账号白名单；
-- 指令：`/pixiv help`（查看全部指令）、`/pixiv r18 status`（查看当前会话档位）、`/pixiv r18 on`（开启 R-18，仍拒绝 R-18G）、`/pixiv r18 all`（R-18G 全放行）、`/pixiv r18 off`（关闭，回落到全局配置）；
+- 指令：`/pixiv help`（查看全部指令）、`/pixiv r18 status`（查看当前会话档位）、`/pixiv r18 on`（开启 R-18，仍拒绝 R-18G）、`/pixiv r18 only`（**只发 R-18**）、`/pixiv r18 gonly`（只发 R-18G）、`/pixiv r18 all`（R-18G 全放行）、`/pixiv r18 off`（关闭，回落到全局配置）；
 - 群聊发 R18 图有平台风控风险，建议仅私聊/熟人小群使用。
 
 ## 使用示例
@@ -114,6 +115,7 @@ python build.py                           # 产出 dist/siwu-pixiv-image-0.1.0.z
 
 ## 版本历史
 
+- v0.2.17：新增「只发 R-18」模式：`/pixiv r18 only`（只 R-18）/ `/pixiv r18 gonly`（只 R-18G），搜索与排行按档位严格过滤。
 - v0.2.16：修复命令无响应：指令处理改用 AstrBot 标准写法（stop_event + make_result），命令结果不再被 LLM 抢答覆盖。
 - v0.2.15：命令重构为 AstrBot 标准指令组（command_group + 子指令）：`/pixiv r18|search|rank|help`，子指令在指令列表/帮助中独立可见，参数按官方方式解析。
 - v0.2.14：修复 /pixiv 命令触发「ToolSet object has no attribute remove」：意图钩子改用 ToolSet.remove_tool() API（兼容旧版 list.remove）。

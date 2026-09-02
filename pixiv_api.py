@@ -40,7 +40,15 @@ APP_UA = "PixivIOSApp/7.13.3 (iOS 14.6; iPhone13,2)"
 IMAGE_REFERER = "https://app-api.pixiv.net/"
 
 # x_restrict: 0=一般向 1=R-18 2=R-18G
-R18_LEVELS: dict[str, set[int]] = {"safe": {0}, "r18": {0, 1}, "r18g": {0, 1, 2}}
+# safe=仅一般向；r18=一般向+R-18；r18g=一般向+R18+R18G；
+# r18only=只R-18（不含一般向、不含R-18G）；r18gonly=只R-18G
+R18_LEVELS: dict[str, set[int]] = {
+    "safe": {0},
+    "r18": {0, 1},
+    "r18g": {0, 1, 2},
+    "r18only": {1},
+    "r18gonly": {2},
+}
 R18_LABELS = {0: "一般向", 1: "R-18", 2: "R-18G"}
 
 # 用户可读排行模式 -> app-api mode 参数

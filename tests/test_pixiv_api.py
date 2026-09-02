@@ -146,6 +146,17 @@ class TestFilterIllusts(unittest.TestCase):
         out2 = filter_illusts(self.items, r18_level="r18g")
         self.assertIn(3, [r["id"] for r in out2])
 
+    def test_r18only_level(self):
+        out = filter_illusts(self.items, r18_level="r18only")
+        ids = [r["id"] for r in out]
+        self.assertNotIn(1, ids)  # 一般向被剔除
+        self.assertIn(2, ids)     # R-18 保留
+        self.assertNotIn(3, ids)  # R-18G 被剔除
+
+    def test_r18gonly_level(self):
+        out = filter_illusts(self.items, r18_level="r18gonly")
+        self.assertEqual([r["id"] for r in out], [3])
+
     def test_min_bookmarks(self):
         out = filter_illusts(self.items, min_bookmarks=1000)
         self.assertNotIn(4, [r["id"] for r in out])
@@ -518,6 +529,10 @@ class TestPixivClient(unittest.TestCase):
         self.assertEqual(R18_LEVELS["safe"], {0})
         self.assertEqual(R18_LEVELS["r18"], {0, 1})
         self.assertEqual(R18_LEVELS["r18g"], {0, 1, 2})
+        self.assertEqual(R18_LEVELS["r18only"], {1})
+        self.assertEqual(R18_LEVELS["r18gonly"], {2})
+        self.assertEqual(R18_LEVELS["r18only"], {1})
+        self.assertEqual(R18_LEVELS["r18gonly"], {2})
 
 
 if __name__ == "__main__":
