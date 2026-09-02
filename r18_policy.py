@@ -55,14 +55,15 @@ def can_enable_r18(
     qid = str(sender_qid).strip() if sender_qid is not None else ""
     if not qid or qid not in owners:
         return False, "你没有权限开启 R-18（需要管理员在插件配置 pixiv_r18_owners 中把你的 QQ 加入白名单）"
-    if group_id is None:
+    gid_raw = str(group_id).strip() if group_id is not None else ""
+    # 私聊事件的 group_id 可能是 None/空串/"0"，一律视为私聊
+    if not gid_raw or gid_raw == "0":
         return True, ""
-    gid = str(group_id).strip()
     if not allowed_groups:
         return False, "未配置允许开启 R-18 的群（pixiv_r18_groups 为空）"
-    if gid in allowed_groups:
+    if gid_raw in allowed_groups:
         return True, ""
-    return False, f"该群（{gid}）不在 pixiv_r18_groups 允许列表中"
+    return False, f"该群（{gid_raw}）不在 pixiv_r18_groups 允许列表中"
 
 
 class R18StateStore:

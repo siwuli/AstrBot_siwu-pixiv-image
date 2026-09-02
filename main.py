@@ -473,6 +473,9 @@ class PixivImagePlugin(star.Star):
         origin = str(event.unified_msg_origin)
         sender = str(event.get_sender_id() or "")
         group_id = getattr(getattr(event, "message_obj", None), "group_id", None)
+        # 私聊事件 group_id 可能为 None/空串/"0"，归一化后再走群聊判断
+        if group_id is not None and str(group_id).strip() in ("", "0"):
+            group_id = None
         store = await self._r18_store_get()
         if sub == "status":
             cur = store.get(origin) or self._r18_level()

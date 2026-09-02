@@ -56,6 +56,15 @@ class TestCanEnableR18(unittest.TestCase):
         ok, _ = can_enable_r18("10001", None, self.OWNERS, set())
         self.assertTrue(ok)
 
+    def test_private_chat_with_empty_group_id(self):
+        # 私聊事件 group_id 可能是空串/"0"，应视为私聊放行
+        ok, _ = can_enable_r18("10001", "", self.OWNERS, self.GROUPS)
+        self.assertTrue(ok)
+        ok2, _ = can_enable_r18("10001", "0", self.OWNERS, self.GROUPS)
+        self.assertTrue(ok2)
+        ok3, _ = can_enable_r18("10001", " ", self.OWNERS, set())
+        self.assertTrue(ok3)
+
     def test_private_chat_non_owner_rejected(self):
         ok, _ = can_enable_r18("10002", None, self.OWNERS, set())
         self.assertFalse(ok)

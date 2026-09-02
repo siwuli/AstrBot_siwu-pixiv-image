@@ -117,6 +117,7 @@ python build.py                           # 产出 dist/siwu-pixiv-image-0.1.0.z
 
 ## 版本历史
 
+- v0.2.21：修复私聊无法开启 R18：私聊事件 group_id 为空串/"0" 被误判为群聊，统一归一化为私聊。
 - v0.2.20：新增 `pixiv_send_rewrite_meta`：发送前纯字节级改写图片元数据（删 EXIF/注释等，像素与尺寸完全不变）；失败重试保持原尺寸档位，不降级缩略图。
 - v0.2.19：发送健壮性：失败自动重试一次（`pixiv_send_fallback`，默认开）。
 - v0.2.18：修复 only/gonly 档位被会话状态存储静默丢弃（R18StateStore 只接受三档）——「/pixiv r18 only」此前显示开启但实际未生效，仍会混入一般向作品。
