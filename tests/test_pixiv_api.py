@@ -174,21 +174,29 @@ class TestSampleBalanced(unittest.TestCase):
         out = sample_balanced(hot, [], 3)
         self.assertEqual(out[0]["id"], 1)
 
-    def test_mid_sampling_and_fresh(self):
-        # 10 个热门取 3：首位 + 中段一张 + 最新一张
+    def test_fresh_not_used_when_hot_sufficient(self):
+        # 热门池充足（10 条取 3）：全部来自热门池，不混最新新作
         hot = self._hot([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
         fresh = self._hot([101])
         out = sample_balanced(hot, fresh, 3)
-        # 热门中段：rest=[2..10] 取中间索引 4 → id 6
-        self.assertEqual([r["id"] for r in out], [1, 6, 101])
+        # 首位 1 + 中段步进：rest=[2..10] 取 idx 2/6 → 4、8
+        self.assertEqual([r["id"] for r in out], [1, 4, 8])
+        self.assertNotIn(101, [r["id"] for r in out])
 
-    def test_fresh_skips_duplicate(self):
-        hot = self._hot([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    def test_fresh_backfills_when_hot_short(self):
+        # 热门只剩 2 条、要 3 张：热门补满后用最新候选补齐
+        hot = self._hot([1, 2])
+        fresh = self._hot([101])
+        out = sample_balanced(hot, fresh, 3)
+        self.assertEqual([r["id"] for r in out], [1, 2, 101])
+
+    def test_fresh_skips_duplicate_when_backfilling(self):
+        hot = self._hot([1])
         fresh = self._hot([1, 101])  # 1 已在热门中出现
-        out = sample_balanced(hot, fresh, 5)
+        out = sample_balanced(hot, fresh, 3)
         ids = [r["id"] for r in out]
+        self.assertEqual(ids, [1, 101])
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertIn(101, ids)
 
     def test_empty_hot_uses_fresh(self):
         out = sample_balanced([], self._hot([201, 202]), 3)
@@ -366,9 +374,10 @@ class TestPixivClient(unittest.TestCase):
         self.assertEqual(s.calls[2][2]["params"]["sort"], "popular_desc")
         self.assertIn(s.calls[2][2]["params"].get("offset"), (30, 60, 90))
         ids = [r["id"] for r in out]
-        # 热门按收藏排序后 [32,33,34,31]：首位=最热，中段取一张，再补一张最新
-        self.assertEqual(ids[0], 32)
-        self.assertIn(35, ids)
+        # 热门按收藏排序后 [32,33,34,31]：首位=最热 + 中段步进取 33/31
+        self.assertEqual(ids, [32, 33, 31])
+        # 热门池充足：不混入最新新作（35 不出现在结果里）
+        self.assertNotIn(35, ids)
         self.assertEqual(len(set(ids)), 3)
 
     def test_premium_balanced_small_pool(self):
@@ -387,8 +396,21 @@ class TestPixivClient(unittest.TestCase):
         out = _run(c.search_illust("rare_tag", min_bookmarks=1000, limit=3, premium=True))
         self.assertEqual(len(s.calls), 2)  # 没有深层页请求
         ids = [r["id"] for r in out]
-        # [41..45] 排序降序：首位 41，中段步进取 44，再补最新 46
-        self.assertEqual(ids, [41, 44, 46])
+        # [41..45] 排序降序：首位 41，中段步进取 43/45
+        self.assertEqual(ids, [41, 43, 45])
+
+    def test_premium_balanced_fresh_backfill(self):
+        # 热门池不足（1 条 < limit 3）：最新候选兜底补齐
+        items = [make_illust(61, bookmarks=9000)]
+        fresh1 = [make_illust(66, bookmarks=2000), make_illust(67, bookmarks=1000)]
+        c, s = self._client([
+            ({"illusts": items, "next_url": None}, 200),
+            ({"illusts": fresh1}, 200),
+        ])
+        c.tokens.update("at", "rt", 3600)
+        out = _run(c.search_illust("tiny_tag", min_bookmarks=1000, limit=3, premium=True))
+        self.assertEqual(len(s.calls), 2)
+        self.assertEqual([r["id"] for r in out], [61, 66, 67])
 
     def test_premium_balanced_extra_empty(self):
         # 深层轮换页越界/为空：静默回退到第 0 页池，不报错
@@ -405,7 +427,7 @@ class TestPixivClient(unittest.TestCase):
         c.tokens.update("at", "rt", 3600)
         out = _run(c.search_illust("small_tag", min_bookmarks=1000, limit=3, premium=True))
         self.assertEqual(len(s.calls), 3)
-        self.assertEqual([r["id"] for r in out], [51, 53, 56])
+        self.assertEqual([r["id"] for r in out], [51, 52, 53])
 
     def test_premium_strict_single_page(self):
         # 关闭均衡混排：单页直取，保持 API 热门顺序（旧行为）

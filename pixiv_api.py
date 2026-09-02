@@ -187,11 +187,10 @@ def sample_balanced(
     fresh: list[dict[str, Any]],
     limit: int = 3,
 ) -> list[dict[str, Any]]:
-    """热门 + 最新混排采样：第一张留给热门最优，其余从热门中段均匀取样，最后补一张最新新作。
+    """热门池优先采样：首位留热门最优，其余从热门中段均匀取样（避免永远同一批顶级图）。
 
-    - hot：已按收藏数降序的热门候选；
-    - fresh：最新排序候选（API 顺序即新→旧，仅取未与热门重复的一张）；
-    - 结果不会永远是同一批顶级图，同时保留「至少有一张真热门」的质量位。
+    fresh（最新候选）仅在热门候选不足填满 limit 时兜底补充——
+    默认结果全部来自热门池，不会混入「最新发布但人气一般」的低收藏图。
     """
     hot = list(hot or [])
     fresh = list(fresh or [])
@@ -208,7 +207,7 @@ def sample_balanced(
         return True
 
     if not hot:
-        # 无热门候选时直接用最新候选填满（保底）
+        # 无热门候选时用最新候选填满（兜底）
         for it in fresh:
             take(it)
             if len(out) >= limit:
@@ -216,25 +215,24 @@ def sample_balanced(
         return out
     take(hot[0])
     quota = limit - len(out)
-    fresh_quota = 1 if (quota > 0 and fresh) else 0
-    hot_quota = max(0, quota - fresh_quota)
-    if hot_quota > 0 and len(hot) > 1:
-        rest = [it for it in hot[1:] if int(it.get("id") or 0) not in seen]
-        if rest:
-            if len(rest) <= hot_quota:
-                for it in rest:
-                    take(it)
-                    if len(out) >= limit:
-                        break
-            else:
-                step = len(rest) / hot_quota
-                for i in range(hot_quota):
-                    idx = min(len(rest) - 1, int((i + 0.5) * step))
-                    take(rest[idx])
-    if fresh_quota and len(out) < limit:
-        for it in fresh:
-            if take(it):
-                break
+    rest = [it for it in hot[1:] if int(it.get("id") or 0) not in seen]
+    hot_take = min(quota, len(rest))
+    if hot_take:
+        if len(rest) <= hot_take:
+            for it in rest:
+                take(it)
+                if len(out) >= limit:
+                    break
+        else:
+            step = len(rest) / hot_take
+            for i in range(hot_take):
+                idx = min(len(rest) - 1, int((i + 0.5) * step))
+                take(rest[idx])
+    # 热门候选不足时，用最新候选补齐剩余名额（兜底）
+    for it in fresh:
+        if len(out) >= limit:
+            break
+        take(it)
     return out
 
 

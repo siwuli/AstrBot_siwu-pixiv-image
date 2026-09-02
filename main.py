@@ -14,7 +14,8 @@
 - HTTP 代理配置（pixiv_proxy，如 http://127.0.0.1:7890）；
 - R18 三档：safe(默认，仅一般向) / r18(允许R-18) / r18g(全放行)，按 x_restrict 过滤；
 - 热门度：搜索按收藏热度过滤最低收藏数（默认 1000，可配置）；默认均衡混排
-  （热门头部+中段+最新新作，按小时轮换），关闭 pixiv_search_balanced 则严格取热度最高；
+  （结果全部来自热门池：首位保底+中段步进，按小时轮换；热门不足才用最新兜底），
+  关闭 pixiv_search_balanced 则严格取热度最高；
 - 发图：图片经代理下载到本地后用 Image.fromFileSystem 发送（i.pximg.net 需 Referer，
   QQ 客户端直连海外图片站不可靠，本地文件最稳），先发图后组织文字。
 """
@@ -190,7 +191,7 @@ class PixivImagePlugin(star.Star):
         self, event: AstrMessageEvent, keyword: str = "", scope: str = "both",
         sort: str = "popular_desc", note: str = "",
     ):
-        """在 Pixiv 按关键词找插画/美图（默认均衡混排：热门头部+中段+最新新作混合，过滤低人气作品，避免每次都是同一批顶级图）。适用于用户要求「找/搜/来几张 xx 的图」「xx 的插画」「miku/初音 图包」等，或用户没有具体要求只想看热门图时。关键词请用作品常用标签/标题词（中文或日文皆可）。scope 可选 tag(仅标签)/title(标题)/both(标签+标题，默认)；sort 可选 popular_desc(默认，收藏优先)/date_desc(最新优先)。会直发热门候选图，请基于返回数据组织最终回复并附上作品链接。
+        """在 Pixiv 按关键词找插画/美图（默认均衡混排且保证热门：全部候选来自热门池，首位保底+中段步进采样避免重复，过滤低人气作品；热门候选不足时才用最新新作兜底）。适用于用户要求「找/搜/来几张 xx 的图」「xx 的插画」「miku/初音 图包」等，或用户没有具体要求只想看热门图时。关键词请用作品常用标签/标题词（中文或日文皆可）。scope 可选 tag(仅标签)/title(标题)/both(标签+标题，默认)；sort 可选 popular_desc(默认，收藏优先)/date_desc(最新优先)。会直发热门候选图，请基于返回数据组织最终回复并附上作品链接。
         
         Args:
             keyword(string): 搜索关键词，如 miku、明日方舟、风景
