@@ -1,145 +1,67 @@
-# P站找图（siwu-pixiv-image · AstrBot 插件）
+# P站找图（pixiv_image）
 
-让机器人访问 Pixiv 找图：关键词搜图、每日/每周排行榜、画师作品、指定作品详情、相似图推荐。
-拆成五个 Agent 工具，由 LLM 根据用户提问自动路由（与 siwu-image-search 同一套多工具架构）。
+Pixiv 找图：关键词搜图、排行榜、画师作品、作品详情与相似图，收藏门槛过滤与 R18 分级控制。
 
-## 功能特性
+## 功能
+- 关键词搜图：默认从满足收藏门槛的热门候选里随机抽取
+- 排行榜：每日/每周/每月，未指定时用配置的默认模式
+- 画师作品、作品详情（链接或 ID）、相似图推荐
+- 收藏门槛过滤，默认 ≥1000 收藏，排行榜不受限
+- R18 五档：safe（默认）/ r18 / r18only / r18gonly / r18g
+- 图片直发，支持 HTTP 代理与 AI 作品过滤
 
-- **多工具 + LLM 路由**：
-  - `siwu_pixiv_search`：关键词搜图，默认「均衡混排」采样
-  - `siwu_pixiv_ranking`：每日/每周/每月排行榜（用户没指定目标时发热门榜）
-  - `siwu_pixiv_artist`：画师名/IP 搜作品
-  - `siwu_pixiv_detail`：pixiv 作品链接/ID 查详情
-  - `siwu_pixiv_related`：按作品 ID 找相似/相关插画
-- **热门度门槛**：低于 `pixiv_min_bookmarks`（默认 1000）收藏的作品直接剔除（会员账号开启 `pixiv_premium` 后由后端热门排序保证；非会员自动拉取两页后客户端按收藏降序，并如实提示未达门槛）
-- **随机抽取（默认开启，`pixiv_search_balanced`）**：热门搜索从「满足收藏门槛的热门候选」里**随机抽取**——不固定首位、每轮结果不同，靠后的好图也有出场机会；结果保持热度降序展示。关闭该配置则严格按收藏热度取最高
-- **R18 五档**：`safe`（默认，仅一般向）/ `r18`（一般向 + R-18）/ `r18only`（只 R-18）/ `r18gonly`（只 R-18G）/ `r18g`（全放行）
-- **refresh_token 鉴权**：Pixiv App-API OAuth 自动续期，轮换后的 token 缓存到 AstrBot 数据目录
-- **代理配置**：`pixiv_proxy` 支持 http/https 代理（Clash 混合端口 7890 亦可）
-- **图片直发**：图片经代理下载到本地后用 `Image.fromFileSystem` 发送（i.pximg.net 需 Referer，QQ 客户端直连不可靠）
-- **AI 作品过滤**：默认过滤 AI 生成作品（`pixiv_filter_ai`，可关闭）
+## 指令
+- `/pixiv search 关键词`：搜图，如 `/pixiv search miku`
+- `/pixiv rank`：今日排行榜
+- `/pixiv r18 status|on|only|gonly|all|off`：会话级 R18 开关（仅白名单账号）
+- `/pixiv help`：显示全部指令
 
-## 配置项
-
-| 配置 | 说明 | 默认 |
+## 配置
+| 配置项 | 默认 | 说明 |
 | --- | --- | --- |
-| `pixiv_enabled` | 启用插件 | true |
-| `pixiv_refresh_token` | Pixiv OAuth refresh_token（必填） | 空 |
-| `pixiv_proxy` | HTTP 代理地址，如 `http://127.0.0.1:7890` | 空（直连） |
-| `pixiv_r18_level` | 全局 R18 档位：safe / r18 / r18only / r18gonly / r18g | safe |
-| `pixiv_r18_owners` | R18 白名单账号 QQ 号（逗号分隔），只有他们能用 `/pixiv r18 on` 开启 | 空 |
-| `pixiv_r18_groups` | 允许开启 R18 的群号白名单（逗号分隔），空=任何群都不能开；私聊不受限 | 空 |
-| `pixiv_min_bookmarks` | 最低收藏数（搜索/画师工具） | 1000 |
-| `pixiv_max_results` | 返回候选条数 1~5 | 3 |
-| `pixiv_send_images` | 每轮直发图片数 1~5 | 1 |
-| `pixiv_rank_default` | 默认排行模式 | daily |
-| `pixiv_filter_ai` | 过滤 AI 作品 | true |
-| `pixiv_send_original` | 发送原图（关闭则发 1200px 大图） | false |
-| `pixiv_send_fallback` | 下载/发送失败时自动重试一次（保持原尺寸档位，不降级） | true |
-| `pixiv_send_rewrite_meta` | 发送前改写图片元数据：删除 EXIF/注释等（纯字节级操作，像素与尺寸完全不变） | false |
-| `pixiv_premium` | Pixiv 高级会员：开启后搜索使用后端热门排序（popular_desc）单页直取；关闭则拉两页按收藏降序兜底（非会员限制） | false |
-| `pixiv_search_balanced` | 热门搜索均衡混排（热门头部+中段+最新新作，按小时轮换）；关闭则严格按收藏热度返回 | true |
+| `pixiv_enabled` | true | 插件总开关 |
+| `pixiv_refresh_token` | 空 | Pixiv 登录凭证，见下方小节 |
+| `pixiv_proxy` | 空 | HTTP 代理地址，留空直连 |
+| `pixiv_r18_level` | safe | R18 档位，默认仅一般向 |
+| `pixiv_min_bookmarks` | 1000 | 搜索最低收藏数门槛 |
+| `pixiv_max_results` | 3 | 搜索/排行最多返回条数 |
+| `pixiv_send_images` | 1 | 每轮最多直发图片数 |
+| `pixiv_rank_default` | daily | 默认排行模式 |
+| `pixiv_filter_ai` | true | 搜索时过滤 AI 作品 |
+| `pixiv_send_original` | false | 发送原图，关闭则发 1200px |
+| `pixiv_send_fallback` | true | 发图失败自动重试一次 |
+| `pixiv_send_rewrite_meta` | false | 发送前删除图片元数据 |
+| `pixiv_r18_owners` | 空 | 可用 R18 指令的账号白名单 |
+| `pixiv_r18_groups` | 空 | 允许开启 R18 的群白名单 |
+| `pixiv_premium` | false | 会员账号，用后端热门排序 |
+| `pixiv_search_balanced` | true | 从热门候选随机抽取 |
 
-## 获取 refresh_token（Pixiv App-API 登录凭证）
+## 安装
+1. 上传插件 zip 到 AstrBot 插件管理并启用
+2. 依赖 `aiohttp`，安装插件时自动安装
+3. 填入 `pixiv_refresh_token`，按需配置 `pixiv_proxy`
 
-插件通过 refresh_token 换取 access_token（有效约 1 小时），并自动用服务端轮换的新 refresh_token 续期。
-**建议注册专用小号**（注册后到 https://www.pixiv.net/settings 打开 R-18/R-18G 显示开关；插件默认 safe 档仍只发一般向，开启不影响）。
+## 获取 refresh_token（使用必读）
+1. `pip install gppt`
+2. `gppt configure` 交互输入 Pixiv 邮箱与密码
+3. `gppt login --e2e` 自动登录并打印 refresh_token（首次会下载 Chromium 内核）
+4. 或 `gppt login --oauth` 浏览器授权后把 code 粘贴回终端
+5. 把得到的 refresh_token 填入配置 `pixiv_refresh_token`，建议用专用小号
+6. 更换账号后填入新 token 并重启，插件会自动作废旧缓存
 
-### 方式一：gppt 命令行自动登录（推荐，需要账号密码）
+## R18 说明
+- 默认 safe（仅一般向）；群聊按群共享档位，私聊各人独立
+- 权限只认 `pixiv_r18_owners` 白名单，群聊还需群号在 `pixiv_r18_groups` 内
+- 群聊发 R18 图有平台风控风险，建议仅私聊或熟人小群使用
 
-```bash
-pip install gppt
-gppt configure          # 交互式输入 Pixiv 邮箱/密码（可存 OTP 密钥，双向验证也能过）
-gppt login --e2e        # 自动驱动浏览器登录并打印 refresh_token
-```
+## 版本记录
+| 版本 | 说明 |
+| --- | --- |
+| 0.2.24 | 精简文档 |
+| 0.2.23 | R18 状态改为群维度共享 |
+| 0.2.22 | 搜索改为热门候选随机抽取 |
+| 0.2.20 | 发送前可删除图片元数据 |
+| 0.2.19 | 发图失败自动重试一次 |
 
-说明：首次运行 `--e2e` 会自动下载 Chromium 内核（约 120MB，需能访问网络的机器）；
-若出现图片验证码，gppt 会在浏览器窗口中等待人工填写（桌面环境直接看窗口）。
-
-### 方式二：OAuth 授权码（免密码，适合浏览器已登录 Pixiv）
-
-```bash
-gppt login --oauth
-```
-
-gppt 会打印一个授权链接：用浏览器打开 → 登录（小号）→ 允许授权 → 浏览器地址栏出现 `pixiv://...?code=xxxx` → 把整段 code 粘贴回终端，得到 refresh_token。
-
-### 方式三：从浏览器 Cookie 导入（旧版 gppt 提供 `gppt cookie`，5.x 已移除）
-
-如使用旧版 gppt（如 4.x）：`gppt cookie --browser chrome` 可直接从已登录的浏览器读取；
-注意导出的 token 属于**浏览器当前登录的账号**，需要小号就先小号登录。
-
-> 拿到 refresh_token 后：填入插件配置 `pixiv_refresh_token`，插件数据目录会缓存轮换后的 token（`data/pixiv_image/token.json`）；
-> token 一旦泄露可到 pixiv 设置页注销全部客户端授权使其失效。
-> **更换 Pixiv 账号后**（例如从小号换成大号）：把新 refresh_token 填入配置并重启即可——插件会通过缓存来源指纹自动识别账号变更并作废旧缓存重新登录；同一账号的正常 token 轮换不受影响。
-
-## R18 分群管理
-
-- 插件默认 `safe`（仅一般向）；**群维度共享**：白名单账号在群里开启后，**该群全体成员**触发 P 站检索都按该档位（其他人无需也不能单独开/关，只能白名单操作）；**私聊相互独立**（各人自己的档位）；状态持久化（重启不丢）；
-- 旧版按「开启者_群」存储的状态会自动迁移为群维度（升级零操作）；
-- **只发 R-18 模式**：`/pixiv r18 only` 后搜索/排行只返回纯 R-18 作品（不含一般向）；`/pixiv r18 gonly` 只返回 R-18G；
-- 权限只认配置的 `pixiv_r18_owners` 白名单，**群主/管理员身份不生效**；群聊还需群号在 `pixiv_r18_groups` 内（配置为空则任何群都不能开），私聊只需账号白名单；
-- 指令：`/pixiv help`（查看全部指令）、`/pixiv r18 status`（查看当前会话档位）、`/pixiv r18 on`（开启 R-18，仍拒绝 R-18G）、`/pixiv r18 only`（**只发 R-18**）、`/pixiv r18 gonly`（只发 R-18G）、`/pixiv r18 all`（R-18G 全放行）、`/pixiv r18 off`（关闭，回落到全局配置）；
-- 群聊发 R18 图有平台风控风险，建议仅私聊/熟人小群使用。
-
-## 使用示例
-
-- 「P站今日排行前十」→ siwu_pixiv_ranking
-- 「来几张 miku 的图」→ siwu_pixiv_search
-- 「画师 望月けい 的作品」→ siwu_pixiv_artist
-- 「https://www.pixiv.net/artworks/123456」→ siwu_pixiv_detail
-- 指令：`/pixiv search miku`（搜图）、`/pixiv rank`（排行榜）、`/pixiv help`（全部指令）、`/pixiv r18 on|all|off|status`（会话级 R18，仅白名单账号）
-
-## 发图机制
-
-针对手机 QQ 图文不能同时发送的限制：先 `event.send(Image.fromFileSystem(...))` 直发图片，再 yield 结构化文本由主 LLM 组织最终回复；
-`on_llm_request` 钩子在命中「pixiv/P站/找图/排行/画师」意图时注入路由指令并移除 `send_message_to_user`，避免重复发送。
-
-## 模块结构
-
-```text
-siwu-pixiv-image-1_0/
-├── main.py            # 插件入口：5 个 llm_tool + 意图钩子 + 命令兜底
-├── pixiv_api.py       # Pixiv App-API 客户端（OAuth/搜索/排行/画师/详情/下载）
-├── _conf_schema.json  # 配置 schema
-├── metadata.yaml      # 插件元数据
-├── requirements.txt   # aiohttp
-├── build.py           # 打包脚本 → dist/siwu-pixiv-image-<version>.zip
-└── tests/             # 单元测试（mock 网络层，无网络依赖）
-```
-
-## 开发与测试
-
-```bash
-python -m unittest discover -s tests -v   # 全绿，无网络依赖
-ruff check .                              # lint 干净
-python build.py                           # 产出 dist/siwu-pixiv-image-0.1.0.zip
-```
-
-## 版本历史
-
-- v0.2.23：R18 状态改为群维度共享：白名单账号在群里开启后全群生效（此前仅开启者本人能触发）；私聊保持独立；旧状态自动迁移。
-- v0.2.22：搜索简化重构：删除「首位保底+中段步进+最新兜底+小时轮换」复杂逻辑，改为从满足门槛的热门候选随机抽取（保持热度降序展示），同步减少请求次数。
-- v0.2.21：修复私聊无法开启 R18：私聊事件 group_id 为空串/"0" 被误判为群聊，统一归一化为私聊。
-- v0.2.20：新增 `pixiv_send_rewrite_meta`：发送前纯字节级改写图片元数据（删 EXIF/注释等，像素与尺寸完全不变）；失败重试保持原尺寸档位，不降级缩略图。
-- v0.2.19：发送健壮性：失败自动重试一次（`pixiv_send_fallback`，默认开）。
-- v0.2.18：修复 only/gonly 档位被会话状态存储静默丢弃（R18StateStore 只接受三档）——「/pixiv r18 only」此前显示开启但实际未生效，仍会混入一般向作品。
-- v0.2.17：新增「只发 R-18」模式：`/pixiv r18 only`（只 R-18）/ `/pixiv r18 gonly`（只 R-18G），搜索与排行按档位严格过滤。
-- v0.2.16：修复命令无响应：指令处理改用 AstrBot 标准写法（stop_event + make_result），命令结果不再被 LLM 抢答覆盖。
-- v0.2.15：命令重构为 AstrBot 标准指令组（command_group + 子指令）：`/pixiv r18|search|rank|help`，子指令在指令列表/帮助中独立可见，参数按官方方式解析。
-- v0.2.14：修复 /pixiv 命令触发「ToolSet object has no attribute remove」：意图钩子改用 ToolSet.remove_tool() API（兼容旧版 list.remove）。
-- v0.2.13：修复 /pixiv 带参数命令报「_empty() takes no arguments」：命令参数改用 GreedyStr 注解（AstrBot 参数解析会将无注解 `*args` 当作 inspect.Parameter.empty 调用导致异常）。
-- v0.2.12：命令帮助完善：/pixiv 注册描述（指令列表可见子命令），支持 /pixiv help 输出全部子命令用法（含 R18 会话级开关）。
-- v0.2.11：缓存来源指纹机制：token 缓存记录其来源配置的 refresh_token 前缀，重启后自动比对——同账号正常轮换保留缓存，配置变更（换账号）自动作废旧缓存并以新配置重新登录，不再依赖手动删除缓存。
-- v0.2.10：修复换账号后旧 token 缓存残留导致继续用旧账号（表现为非会员、热门排序失效）的问题：检测配置与缓存不一致并告警，README/配置说明明确「更换账号需删除 token.json 再重启」。
-- v0.2.9：均衡混排改为热门池优先：结果全部来自热门池（首位保底+中段步进），不再混入低收藏最新新作；最新候选仅在热门不足时兜底补齐。
-- v0.2.8：均衡混排自适应页数：第 0 页热门保底，仅当结果充足（next_url 存在）才按小时轮换追加深层页，冷门关键词不再越界拉空。
-- v0.2.7：均衡混排搜索（默认开启）：热门头部+中段+最新新作混合采样、按小时轮换页起点，同一关键词多次搜索不重复，靠后的好图也能出现；新增 `pixiv_search_balanced` 配置可关闭。
-- v0.2.5：会员模式 `pixiv_premium`：会员账号使用后端热门排序，非会员拉两页按收藏降序兜底。
-- v0.2.2：搜索接口修正为 /v1/search/illust。
-- v0.2.0：R18 分群管理（白名单账号指令开/关、群白名单、会话级持久化）；插件改名去个性化称呼（P站找图）。
-- v0.1.0：首个版本。四工具 + LLM 路由、OAuth 自动续期、三档 R18、收藏门槛、代理、本地发图。
-
-## 相关
-
-- 同系列插件：[siwu-image-search（动漫识图三合一）](https://github.com/siwuli/AstrBot_siwu-image-search)
+## 项目地址
+<https://github.com/siwuli/AstrBot_siwu-pixiv-image>
